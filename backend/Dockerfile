@@ -20,6 +20,14 @@ COPY . .
 
 RUN chmod +x docker-entrypoint.sh
 
+# staticfiles/ and media/ are gitignored (build output / uploads, not
+# source), so they don't exist in the image unless created here. Without
+# this, docker-compose.prod.yml's named volumes mount over paths that
+# don't pre-exist in the image, so Docker creates them root-owned instead
+# of copying appuser-owned dirs from the image — collectstatic then fails
+# with a permission error since the container runs as appuser.
+RUN mkdir -p staticfiles media
+
 RUN useradd --create-home appuser \
     && chown -R appuser:appuser /app
 USER appuser
