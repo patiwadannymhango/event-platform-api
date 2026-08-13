@@ -199,22 +199,40 @@ already owns port 80, set `HTTP_PORT=8080` in `.env.prod` and use
 
 ---
 
-## 2c. Later, when you do buy a domain
+## 2c. Getting HTTPS (required before connecting real Vercel frontends)
 
-Point an A record at the server, then in the `Caddyfile` change the first
-line from `:80 {` to your domain and let Caddy handle HTTPS:
+Vercel always serves over HTTPS, and browsers block an HTTPS page from
+calling a plain `http://` backend ("mixed content") — so this step isn't
+optional once real frontends need to reach the API, even without a domain.
 
-```caddy
-api.copperbeltmarathon2026.org {
-	# ...everything inside stays exactly as it is...
-}
+**Free, no domain needed — sslip.io:** with a fixed Elastic IP attached
+(see step 2), `<ip-with-dashes>.sslip.io` is a real, publicly resolvable
+hostname that resolves straight back to that IP — e.g. `15.240.170.199`
+becomes `https://15-240-170-199.sslip.io`. Caddy can fetch a genuine
+Let's Encrypt cert for it like any other domain. Set in `.env.prod`:
+
+```
+SITE_ADDRESS=https://15-240-170-199.sslip.io
 ```
 
-Then re-open port 443 in the security group, add the domain to
-`ALLOWED_HOSTS` in `backend/.env`, restore `- "443:443"` to the `proxy`
-ports in `docker-compose.prod.yml`, and restart. Caddy fetches the
-certificate on the first request. Update `VITE_API_BASE_URL` in both
-Vercel projects to the new `https://api.yourdomain.com` and redeploy them.
+**Or, with a real domain later:** point an A record at the Elastic IP,
+then set `SITE_ADDRESS` to that domain instead — nothing else changes.
+
+```
+SITE_ADDRESS=https://api.copperbeltmarathon2026.org
+```
+
+Either way: open port 443 in the security group (`docker-compose.prod.yml`
+already maps it), add the hostname to `ALLOWED_HOSTS` in `backend/.env`,
+then recreate the proxy container:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --force-recreate proxy
+```
+
+Caddy fetches the certificate automatically on the first request. Update
+`VITE_API_BASE_URL` in both Vercel projects to the new `https://...`
+address and redeploy them.
 
 ---
 

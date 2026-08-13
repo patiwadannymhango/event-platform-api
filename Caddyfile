@@ -4,17 +4,22 @@
 # cross-origin (see CORS_ALLOWED_ORIGINS in backend/.env and the root
 # README's "Deploying to Vercel" sections).
 #
-# Everything below is served from one address on port 80 — localhost, a
-# LAN IP, an EC2 public IP, whatever you deploy on.
+# Everything below is served from one address — localhost, a LAN IP, an
+# EC2 public IP, an sslip.io hostname, or a real domain, whatever
+# SITE_ADDRESS (set in .env.prod) points at:
 #
 #   http://<address>/api/v1/...     → Django REST API
 #   http://<address>/django-admin   → Django's built-in admin site
 #   http://<address>/static|/media  → Django static + uploaded files
 #
-# `:80` matches any hostname, so nothing here needs to change when you
-# later buy a domain — see the README for the HTTPS switch-over.
+# SITE_ADDRESS defaults to `:80` (matches any hostname, no TLS — fine for
+# local dev or a bare IP). Set it to an https:// hostname (an sslip.io
+# address or a real domain pointed at your Elastic IP) to get Caddy to
+# automatically fetch a real Let's Encrypt cert and serve HTTPS instead —
+# see the README's HTTPS section. No other line in this file needs to
+# change either way.
 
-:80 {
+{$SITE_ADDRESS::80} {
 	# Django's own static/media (admin site CSS, uploaded files) served
 	# directly by Caddy from the shared volumes, everything else goes to
 	# gunicorn.
