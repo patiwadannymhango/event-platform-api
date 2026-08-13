@@ -323,6 +323,17 @@ auto-deploys each one independently on every push.
 
 ---
 
+## 3b. Database backups
+
+The production Postgres container has no backup on its own — losing the
+EC2 instance or its disk means losing the database. `infra/backup-db.sh`
+and `infra/restore-db.sh` handle daily dumps (local + optional offsite S3
+upload) and restoring from one. One-time S3/IAM setup and cron wiring are
+in [`infra/README.md`](infra/README.md) — set this up before you have real
+registrations to lose.
+
+---
+
 ## 4. Local development (unchanged from before)
 
 Locally, both frontends still run the same way regardless of where they
