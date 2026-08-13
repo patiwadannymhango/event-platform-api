@@ -54,6 +54,16 @@ ALLOWED_HOSTS = config(
     cast=Csv(),
 )
 
+# Full scheme+host origins allowed to make unsafe (POST/PUT/etc) requests —
+# needed for django-admin logins in production, where Caddy terminates TLS
+# and this is the https:// address the browser actually sees. See
+# SECURE_PROXY_SSL_HEADER below for the other half of this.
+CSRF_TRUSTED_ORIGINS = config(
+    "CSRF_TRUSTED_ORIGINS",
+    default="",
+    cast=Csv(),
+)
+
 # The publicly reachable origin for this backend — used to build the
 # webhook callback URL sent to Lipila. Deliberately NOT derived from the
 # incoming request's Host header: in local dev the browser talks to the
