@@ -1,0 +1,611 @@
+from django.conf import settings
+
+from rest_framework import status
+from rest_framework.permissions import (
+    AllowAny,
+)
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.registrations.models import (
+    Registration,
+)
+
+from .providers.lipila.client import (
+    LipilaAPIError,
+)
+from .serializers import (
+    InitiatePaymentSerializer,
+)
+from .services import (
+    create_payment,
+    initiate_card_payment,
+    initiate_mobile_payment,
+)
+
+
+def _fail_payment(payment, exc):
+    """
+    Shared failure path for both mobile money and card collection
+    attempts: mark the payment FAILED (so it doesn't sit as a phantom
+    PENDING/PROCESSING row forever) and surface Lipila's actual reason
+    to the caller instead of a generic 500.
+    """
+
+    payment.status = payment.Status.FAILED
+    payment.provider_response = {
+        **payment.provider_response,
+        "error": str(exc.args[0]),
+    }
+    payment.save(
+        update_fields=[
+            "status",
+            "provider_response",
+            "updated_at",
+        ]
+    )
+
+    return Response(
+        {"detail": _lipila_error_message(exc)},
+        status=status.HTTP_502_BAD_GATEWAY,
+    )
+
+
+def _lipila_error_message(exc):
+    """
+    Turn a LipilaAPIError's raw response payload into a message the
+    runner can actually act on (e.g. "Invalid phone number format"),
+    instead of a generic failure with no explanation.
+    """
+
+    payload = exc.args[0] if exc.args else {}
+
+    if isinstance(payload, dict):
+
+        errors = payload.get("errors")
+
+        if isinstance(errors, dict) and errors:
+            first_value = next(iter(errors.values()))
+            if isinstance(first_value, list) and first_value:
+                return str(first_value[0])
+            return str(first_value)
+
+        if payload.get("message"):
+            return str(payload["message"])
+
+    return (
+        "The payment provider rejected this request. "
+        "Please check the details and try again."
+    )
+
+
+class PublicBankDetailsView(APIView):
+    """
+    GET /api/v1/payments/public/bank-details/
+
+    Bank account details for runners paying by bank transfer, kept
+    server-side in settings/.env so they can be corrected without a
+    frontend deploy.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from django.conf import settings
+        return Response(settings.BANK_ACCOUNT_DETAILS)
+
+
+class PublicPaymentStatusView(APIView):
+    """
+    GET /api/v1/payments/public/payments/<payment_id>/status/
+
+    Polled by the frontend while a mobile money prompt is on the runner's
+    phone, so it knows when to stop showing the "check your phone" screen.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, payment_id):
+
+        from .models import Payment as PaymentModel
+
+        try:
+
+            payment = (
+                PaymentModel.objects
+                .select_related("registration")
+                .get(id=payment_id)
+            )
+
+        except PaymentModel.DoesNotExist:
+
+            return Response(
+                {"detail": "Payment not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {
+                "status": payment.status,
+                "registration_status": (
+                    payment.registration.status
+                ),
+                "amount": str(payment.amount),
+                "currency": payment.currency,
+            }
+        )
+
+
+class InitiatePaymentView(APIView):
+
+    permission_classes = [
+        AllowAny,
+    ]
+
+    def post(
+        self,
+        request,
+        registration_id,
+    ):
+
+        try:
+
+            registration = (
+                Registration.objects.get(
+                    id=registration_id,
+                )
+            )
+
+        except Registration.DoesNotExist:
+
+            return Response(
+                {
+                    "detail": (
+                        "Registration not found."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if registration.status != (
+            Registration.Status.PENDING_PAYMENT
+        ):
+
+            return Response(
+                {
+                    "detail": (
+                        "This registration "
+                        "cannot accept payment."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = (
+            InitiatePaymentSerializer(
+                data=request.data
+            )
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        method = serializer.validated_data[
+            "payment_method"
+        ]
+
+        payment = create_payment(
+            registration=registration,
+            payment_method=method,
+        )
+
+        redirect_url = ""
+
+        callback_url = (
+            f"{settings.PUBLIC_BASE_URL}/api/v1/payments/webhooks/lipila/"
+            if settings.PUBLIC_BASE_URL
+            else request.build_absolute_uri(
+                "/api/v1/payments/webhooks/lipila/"
+            )
+        )
+
+        if method in ("MTN_MONEY", "AIRTEL_MONEY", "ZAMTEL_KWACHA"):
+
+            try:
+
+                payment = initiate_mobile_payment(
+                    payment=payment,
+                    phone_number=(
+                        serializer.validated_data[
+                            "phone_number"
+                        ]
+                    ),
+                    callback_url=callback_url,
+                )
+
+            except LipilaAPIError as exc:
+
+                return _fail_payment(
+                    payment, exc
+                )
+
+        elif method == "CARD":
+
+            back_url = (
+                request.data.get("back_url")
+                or callback_url
+            )
+
+            try:
+
+                payment, redirect_url = (
+                    initiate_card_payment(
+                        payment=payment,
+                        participant=(
+                            registration.participant
+                        ),
+                        city=serializer.validated_data.get(
+                            "city", ""
+                        ),
+                        address=serializer.validated_data.get(
+                            "address", ""
+                        ),
+                        zip_code=serializer.validated_data.get(
+                            "zip_code", ""
+                        ),
+                        country=serializer.validated_data.get(
+                            "country", "ZM"
+                        ),
+                        callback_url=callback_url,
+                        back_url=back_url,
+                    )
+                )
+
+            except LipilaAPIError as exc:
+
+                return _fail_payment(
+                    payment, exc
+                )
+
+        elif method == "BANK_TRANSFER":
+
+            # No Lipila call for bank transfer — just record who to expect
+            # the transfer from, so admins can reconcile it against the
+            # bank statement.
+            payment.provider_response = {
+                **payment.provider_response,
+                "bank_transfer": {
+                    "payer_name": serializer.validated_data.get(
+                        "payer_name", ""
+                    ),
+                    "transfer_reference": serializer.validated_data.get(
+                        "transfer_reference", ""
+                    ),
+                },
+            }
+
+            payment.save(
+                update_fields=[
+                    "provider_response",
+                    "updated_at",
+                ]
+            )
+
+        return Response(
+            {
+                "payment": {
+                    "id": payment.id,
+                    "reference": (
+                        payment.reference
+                    ),
+                    "provider_reference": (
+                        payment.provider_reference
+                    ),
+                    "amount": str(
+                        payment.amount
+                    ),
+                    "currency": (
+                        payment.currency
+                    ),
+                    "status": (
+                        payment.status
+                    ),
+                    "payment_method": (
+                        payment.payment_method
+                    ),
+                    "redirect_url": redirect_url,
+                }
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Admin-facing views
+# ---------------------------------------------------------------------------
+
+from decimal import Decimal, InvalidOperation
+
+from rest_framework import filters
+from rest_framework.generics import ListAPIView
+from rest_framework.permissions import IsAuthenticated
+from django_filters.rest_framework import DjangoFilterBackend
+
+from .models import Payment as PaymentModel, Transaction, Wallet, Withdrawal
+from .serializers import (
+    PaymentSerializer,
+    RefundRequestSerializer,
+    SendMoneySerializer,
+    TransactionSerializer,
+    WalletSerializer,
+    WithdrawalRequestSerializer,
+    WithdrawalSerializer,
+)
+from .services import get_live_balance, process_refund, request_withdrawal
+
+
+def _event_wallet(event):
+    wallet, _ = Wallet.objects.get_or_create(event=event)
+    return wallet
+
+
+class AdminWalletBalanceView(APIView):
+    """
+    GET /api/v1/payments/admin/events/<event_id>/wallet/balance/
+
+    Returns the ledger balance always, and attempts a live Lipila balance
+    call as well — if Lipila is unreachable the ledger balance is still
+    returned so the dashboard doesn't just break.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, event_id):
+        from apps.events.models import Event
+
+        event = Event.objects.get(id=event_id)
+        wallet = _event_wallet(event)
+
+        data = {
+            "ledger_balance": str(wallet.balance),
+            "pending_balance": str(wallet.pending_balance),
+            "currency": wallet.currency,
+            "live_balance": None,
+            "live_balance_error": None,
+        }
+
+        if event.payment_account:
+            try:
+                live = get_live_balance(event.payment_account)
+                data["live_balance"] = live
+            except Exception as exc:  # noqa: BLE001
+                data["live_balance_error"] = str(exc)
+
+        return Response(data)
+
+
+class AdminDashboardView(APIView):
+    """
+    GET /api/v1/payments/admin/events/<event_id>/dashboard/
+
+    One-stop summary for the admin dashboard: registration counts by
+    status, revenue collected vs pending, and wallet balance.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, event_id):
+        from django.db.models import Sum, Count
+        from apps.registrations.models import Registration
+
+        registrations = Registration.objects.filter(event_id=event_id)
+
+        by_status = list(
+            registrations.values("status").annotate(count=Count("id"))
+        )
+
+        revenue_confirmed = (
+            registrations.filter(status=Registration.Status.CONFIRMED)
+            .aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+
+        revenue_pending = (
+            registrations.filter(
+                status__in=[
+                    Registration.Status.PENDING_PAYMENT,
+                    Registration.Status.PAYMENT_PROCESSING,
+                    Registration.Status.RESERVED,
+                ]
+            ).aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+
+        wallet, _ = Wallet.objects.get_or_create(event_id=event_id)
+
+        return Response(
+            {
+                "total_registrations": registrations.count(),
+                "by_status": by_status,
+                "revenue_confirmed": str(revenue_confirmed),
+                "revenue_pending": str(revenue_pending),
+                "wallet_balance": str(wallet.balance),
+                "wallet_pending_balance": str(wallet.pending_balance),
+            }
+        )
+
+
+class AdminTransactionListView(ListAPIView):
+    """GET /api/v1/payments/admin/events/<event_id>/transactions/"""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = TransactionSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["transaction_type", "direction", "status"]
+    search_fields = ["reference", "provider_reference", "description"]
+    ordering_fields = ["created_at", "amount"]
+
+    def get_queryset(self):
+        return Transaction.objects.filter(
+            wallet__event_id=self.kwargs["event_id"]
+        )
+
+
+class AdminPaymentListView(ListAPIView):
+    """GET /api/v1/payments/admin/events/<event_id>/payments/"""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = PaymentSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["status", "payment_method"]
+    search_fields = ["reference", "provider_reference", "registration__registration_number"]
+    ordering_fields = ["created_at", "amount"]
+
+    def get_queryset(self):
+        return PaymentModel.objects.filter(
+            registration__event_id=self.kwargs["event_id"]
+        )
+
+
+class AdminWithdrawalListView(ListAPIView):
+    """GET /api/v1/payments/admin/events/<event_id>/withdrawals/"""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = WithdrawalSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["status", "destination"]
+    ordering_fields = ["requested_at", "amount"]
+
+    def get_queryset(self):
+        return Withdrawal.objects.filter(
+            wallet__event_id=self.kwargs["event_id"]
+        )
+
+
+class AdminWithdrawView(APIView):
+    """
+    POST /api/v1/payments/admin/events/<event_id>/wallet/withdraw/
+
+    Withdraw event funds out to the organiser's own mobile money number
+    (or record a bank/cash withdrawal for manual reconciliation).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, event_id):
+        serializer = WithdrawalRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        wallet = Wallet.objects.get(event_id=event_id)
+        data = serializer.validated_data
+
+        if data["amount"] > wallet.balance:
+            return Response(
+                {"detail": "Withdrawal amount exceeds available balance."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        withdrawal = request_withdrawal(
+            wallet=wallet,
+            amount=data["amount"],
+            destination=data["destination"],
+            destination_account=data["destination_account"],
+            recipient_name=data.get("recipient_name", ""),
+            narration=data.get("narration", ""),
+            requested_by=request.user,
+        )
+
+        return Response(
+            WithdrawalSerializer(withdrawal).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminSendMoneyView(APIView):
+    """
+    POST /api/v1/payments/admin/events/<event_id>/wallet/send-money/
+
+    Ad-hoc disbursement to any mobile money number — e.g. paying a
+    supplier or correcting a manual error. Recorded as a Withdrawal so it
+    appears in the same audit trail.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, event_id):
+        serializer = SendMoneySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        wallet = Wallet.objects.get(event_id=event_id)
+        data = serializer.validated_data
+
+        if data["amount"] > wallet.balance:
+            return Response(
+                {"detail": "Amount exceeds available balance."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        withdrawal = request_withdrawal(
+            wallet=wallet,
+            amount=data["amount"],
+            destination=Withdrawal.Destination.MOBILE_MONEY,
+            destination_account=data["account_number"],
+            recipient_name=data.get("recipient_name", ""),
+            narration=data.get("narration", "Manual send money"),
+            requested_by=request.user,
+        )
+
+        return Response(
+            WithdrawalSerializer(withdrawal).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminRefundPaymentView(APIView):
+    """POST /api/v1/payments/admin/payments/<payment_id>/refund/"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, payment_id):
+        try:
+            payment = PaymentModel.objects.get(id=payment_id)
+        except PaymentModel.DoesNotExist:
+            return Response(
+                {"detail": "Payment not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if payment.status != PaymentModel.Status.SUCCESS:
+            return Response(
+                {"detail": "Only successful payments can be refunded."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RefundRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        amount = serializer.validated_data.get("amount")
+
+        try:
+            payment, txn, provider_response = process_refund(
+                payment=payment,
+                amount=amount,
+                requested_by=request.user,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return Response(
+                {"detail": f"Refund failed: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        from apps.notifications.services import notify_refund_processed
+
+        notify_refund_processed(payment.registration, amount=txn.amount)
+
+        return Response(
+            {
+                "payment": PaymentSerializer(payment).data,
+                "transaction": TransactionSerializer(txn).data,
+            }
+        )

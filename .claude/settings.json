@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs -I{} echo {})",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8000/api/v1/payments/public/payments/00000000-0000-0000-0000-000000000000/status/)",
+      "Bash(npx tsc *)",
+      "Bash(curl -sS -X POST http://localhost:8000/api/v1/payments/public/registrations/bb7b896c-9cef-482a-80cc-8e1e3ba6b5a3/pay/ -H 'Content-Type: application/json' -d '{\"payment_method\":\"CARD\",\"city\":\"Kitwe\",\"address\":\"1 Independence Ave\",\"zip_code\":\"10101\",\"country\":\"ZM\"}')",
+      "Bash(find \"C:/Users/USER/AppData/Local/Temp\" -iname \"*paste*\" -newer \"C:/Users/USER/Downloads/copperbelt-marathon-dockerized v2/copperbelt-marathon/README.md\" 2>/dev/null | head -20 *)",
+      "Read(//c/Users/USER/AppData/Local/Temp/**)",
+      "Read(//c/Users/USER/AppData/Local/Temp/claude/**)"
+    ]
+  }
+}
