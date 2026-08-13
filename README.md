@@ -29,7 +29,7 @@ copperbelt-marathon/
 
 ## How it fits together in production
 
-**No domain required for the backend.** It's reachable at a single test
+**No domain required for the backend.** It's reachable at a single thhhhh
 address — `localhost`, a LAN IP, or an EC2 public IP — fronted by Caddy.
 Both frontends are separate Vercel projects, each with its own domain,
 each making real cross-origin requests to the backend.
