@@ -315,13 +315,29 @@ if you're only using previews for UI review).
 
 ## 3. Set up automatic deployment from GitHub (backend only)
 
+Generate a **dedicated** deploy key rather than reusing your own admin
+`.pem` — keeps that key off GitHub entirely, scoped to nothing but SSH
+access:
+
+```bash
+# on your own machine
+ssh-keygen -t ed25519 -f event-platform-deploy -N "" -C "github-actions-deploy"
+```
+
+Append the `.pub` file's contents to `~/.ssh/authorized_keys` **on the
+server** (via your own admin key):
+
+```bash
+ssh -i your-admin-key.pem ubuntu@<server> "echo '$(cat event-platform-deploy.pub)' >> ~/.ssh/authorized_keys"
+```
+
 In your GitHub repo → **Settings → Secrets and variables → Actions**, add:
 
 | Secret | Value |
 |---|---|
 | `AWS_HOST` | your server's public IP or hostname |
 | `AWS_SSH_USER` | the SSH user (e.g. `ubuntu`) |
-| `AWS_SSH_PRIVATE_KEY` | the private key that matches a public key already in the server's `~/.ssh/authorized_keys` |
+| `AWS_SSH_PRIVATE_KEY` | contents of the `event-platform-deploy` private key generated above (not your admin `.pem`) |
 | `AWS_PROJECT_PATH` | the absolute path to the repo on the server, e.g. `/home/ubuntu/copperbelt-marathon` |
 
 From then on: **any push to `main` automatically SSHs into the server,
