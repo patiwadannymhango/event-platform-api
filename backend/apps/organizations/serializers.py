@@ -51,6 +51,7 @@ class OrganizationListSerializer(
             "email",
             "phone",
             "website",
+            "is_active",
             "role",
         )
 

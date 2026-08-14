@@ -31,7 +31,8 @@
       "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/pages/**)"
     ],
     "additionalDirectories": [
-      "C:\\Users\\USER\\Documents\\GitHub\\copperbelt-marathon-site\\src\\components"
+      "C:\\Users\\USER\\Documents\\GitHub\\copperbelt-marathon-site\\src\\components",
+      "C:\\Users\\USER\\Documents\\GitHub\\event-platform-admin\\src"
     ]
   }
 }
