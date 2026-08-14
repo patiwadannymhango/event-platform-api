@@ -35,6 +35,14 @@ EVENT_FINANCE_ROLES = (
     "FINANCE",
 )
 
+# Role strings that indicate admin-level control of an event (native
+# EventMembership "ADMIN", or an org OWNER/ADMIN role bubbling down) —
+# used to gate managing an event's own memberships.
+EVENT_ADMIN_ROLES = (
+    "OWNER",
+    "ADMIN",
+)
+
 
 def get_user_organization_membership(
     user,

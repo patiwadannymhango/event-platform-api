@@ -1,6 +1,8 @@
 from decimal import Decimal
 from rest_framework import serializers
 
+from .models import PaymentAccount, PaymentProvider
+
 
 class InitiatePaymentSerializer(
     serializers.Serializer
@@ -249,3 +251,53 @@ class RefundRequestSerializer(serializers.Serializer):
     amount = serializers.DecimalField(
         max_digits=14, decimal_places=2, min_value=Decimal('0.01'), required=False
     )
+
+
+class PaymentProviderSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = PaymentProvider
+        fields = (
+            "id",
+            "name",
+            "code",
+            "provider_type",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class PaymentAccountSerializer(serializers.ModelSerializer):
+
+    organization_name = serializers.CharField(
+        source="organization.name", read_only=True
+    )
+    provider_name = serializers.CharField(
+        source="provider.name", read_only=True
+    )
+
+    class Meta:
+        model = PaymentAccount
+        fields = (
+            "id",
+            "organization",
+            "organization_name",
+            "provider",
+            "provider_name",
+            "account_type",
+            "name",
+            "provider_account_id",
+            "currency",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "organization_name",
+            "provider_name",
+            "created_at",
+            "updated_at",
+        )

@@ -6,7 +6,11 @@ from apps.payments.providers.lipila.webhooks import (
 
 from .views import (
     AdminDashboardView,
+    AdminPaymentAccountDetailView,
+    AdminPaymentAccountListView,
     AdminPaymentListView,
+    AdminPaymentProviderDetailView,
+    AdminPaymentProviderListView,
     AdminRefundPaymentView,
     AdminSendMoneyView,
     AdminTransactionListView,
@@ -81,6 +85,26 @@ urlpatterns = [
         "admin/payments/<uuid:payment_id>/refund/",
         AdminRefundPaymentView.as_view(),
         name="admin-refund-payment",
+    ),
+    path(
+        "admin/providers/",
+        AdminPaymentProviderListView.as_view(),
+        name="admin-payment-provider-list",
+    ),
+    path(
+        "admin/providers/<uuid:provider_id>/",
+        AdminPaymentProviderDetailView.as_view(),
+        name="admin-payment-provider-detail",
+    ),
+    path(
+        "admin/accounts/",
+        AdminPaymentAccountListView.as_view(),
+        name="admin-payment-account-list",
+    ),
+    path(
+        "admin/accounts/<uuid:account_id>/",
+        AdminPaymentAccountDetailView.as_view(),
+        name="admin-payment-account-detail",
     ),
 
 ]

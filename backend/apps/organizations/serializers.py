@@ -29,7 +29,7 @@
 
 from rest_framework import serializers
 
-from .models import Organization
+from .models import Organization, OrganizationMembership
 
 
 class OrganizationListSerializer(
@@ -80,3 +80,50 @@ class OrganizationDetailSerializer(
             "created_at",
             "updated_at",
         )
+
+
+class OrganizationWriteSerializer(serializers.ModelSerializer):
+    """Create/update — superuser creates, org OWNER/ADMIN (or superuser) updates."""
+
+    class Meta:
+        model = Organization
+        fields = (
+            "id",
+            "name",
+            "slug",
+            "description",
+            "email",
+            "phone",
+            "website",
+            "is_active",
+        )
+        read_only_fields = ("id",)
+
+
+class OrganizationMembershipSerializer(serializers.ModelSerializer):
+
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrganizationMembership
+        fields = (
+            "id",
+            "user",
+            "user_email",
+            "user_full_name",
+            "organization",
+            "role",
+            "is_active",
+        )
+        read_only_fields = ("id", "organization", "user_email", "user_full_name")
+
+    def get_user_full_name(self, membership):
+        return membership.user.full_name
+
+
+class OrganizationMembershipWriteSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = OrganizationMembership
+        fields = ("user", "role")

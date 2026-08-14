@@ -13,7 +13,7 @@ from apps.common.access import (
     EVENT_VIEW_ROLES,
     require_event_role,
 )
-from apps.common.permissions import HasEventRole
+from apps.common.permissions import HasEventRole, IsSuperUser
 from apps.registrations.models import (
     Registration,
 )
@@ -349,7 +349,14 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import Payment as PaymentModel, Transaction, Wallet, Withdrawal
+from .models import (
+    Payment as PaymentModel,
+    PaymentAccount,
+    PaymentProvider,
+    Transaction,
+    Wallet,
+    Withdrawal,
+)
 from .serializers import (
     PaymentSerializer,
     RefundRequestSerializer,
@@ -637,3 +644,83 @@ class AdminRefundPaymentView(APIView):
                 "transaction": TransactionSerializer(txn).data,
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# Payment provider/account management — superuser only, since these hold
+# the merchant/provider configuration events get paid through. Built
+# here rather than in apps/payment_providers, which has no models of its
+# own and isn't wired into config/urls.py.
+# ---------------------------------------------------------------------------
+
+from .serializers import PaymentAccountSerializer, PaymentProviderSerializer
+
+
+class AdminPaymentProviderListView(ListAPIView):
+    """GET/POST /api/v1/payments/admin/providers/"""
+
+    permission_classes = [IsAuthenticated, IsSuperUser]
+    serializer_class = PaymentProviderSerializer
+    queryset = PaymentProvider.objects.all().order_by("name")
+
+    def post(self, request):
+        serializer = PaymentProviderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        provider = serializer.save()
+        return Response(
+            PaymentProviderSerializer(provider).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminPaymentProviderDetailView(APIView):
+    """PATCH /api/v1/payments/admin/providers/<provider_id>/"""
+
+    permission_classes = [IsAuthenticated, IsSuperUser]
+
+    def patch(self, request, provider_id):
+        from django.shortcuts import get_object_or_404
+
+        provider = get_object_or_404(PaymentProvider, id=provider_id)
+        serializer = PaymentProviderSerializer(
+            provider, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(PaymentProviderSerializer(provider).data)
+
+
+class AdminPaymentAccountListView(ListAPIView):
+    """GET/POST /api/v1/payments/admin/accounts/"""
+
+    permission_classes = [IsAuthenticated, IsSuperUser]
+    serializer_class = PaymentAccountSerializer
+    queryset = PaymentAccount.objects.select_related(
+        "organization", "provider"
+    ).order_by("name")
+
+    def post(self, request):
+        serializer = PaymentAccountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        account = serializer.save()
+        return Response(
+            PaymentAccountSerializer(account).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminPaymentAccountDetailView(APIView):
+    """PATCH /api/v1/payments/admin/accounts/<account_id>/"""
+
+    permission_classes = [IsAuthenticated, IsSuperUser]
+
+    def patch(self, request, account_id):
+        from django.shortcuts import get_object_or_404
+
+        account = get_object_or_404(PaymentAccount, id=account_id)
+        serializer = PaymentAccountSerializer(
+            account, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(PaymentAccountSerializer(account).data)

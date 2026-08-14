@@ -5,6 +5,9 @@ from rest_framework_simplejwt.views import (
 )
 
 from .views import (
+    AdminUserCreateView,
+    AdminUserDetailView,
+    AdminUserListView,
     ChangePasswordView,
     LoginView,
     LogoutView,
@@ -40,5 +43,21 @@ urlpatterns = [
         "change-password/",
         ChangePasswordView.as_view(),
         name="change-password",
+    ),
+
+    path(
+        "admin/users/",
+        AdminUserListView.as_view(),
+        name="admin-user-list",
+    ),
+    path(
+        "admin/users/create/",
+        AdminUserCreateView.as_view(),
+        name="admin-user-create",
+    ),
+    path(
+        "admin/users/<uuid:user_id>/",
+        AdminUserDetailView.as_view(),
+        name="admin-user-detail",
     ),
 ]
