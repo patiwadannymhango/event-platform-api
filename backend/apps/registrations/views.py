@@ -227,7 +227,10 @@ class AdminRegistrationListView(ListAPIView):
 
     Supports ?status=, ?category=, ?search=, ?ordering= and standard
     pagination — this is the data source for the admin registrations
-    table.
+    table. ?gender=, ?organisation=, ?attendance_type= filter on the
+    equivalent keys inside form_data (there's no dedicated column for
+    these — the registration form is admin-configurable per event, so
+    these answers live in the JSON blob rather than fixed model fields).
     """
 
     permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
@@ -244,10 +247,61 @@ class AdminRegistrationListView(ListAPIView):
     ordering_fields = ["registered_at", "amount", "status"]
 
     def get_queryset(self):
-        return (
+        qs = (
             Registration.objects
             .select_related("participant", "category", "event")
             .filter(event_id=self.kwargs["event_id"])
+        )
+
+        gender = self.request.query_params.get("gender")
+        if gender:
+            qs = qs.filter(form_data__gender=gender)
+
+        organisation = self.request.query_params.get("organisation")
+        if organisation:
+            qs = qs.filter(form_data__club_or_institution=organisation)
+
+        attendance_type = self.request.query_params.get("attendance_type")
+        if attendance_type:
+            qs = qs.filter(form_data__attendance_type=attendance_type)
+
+        return qs
+
+
+class AdminRegistrationFilterOptionsView(APIView):
+    """
+    GET /api/v1/registrations/admin/events/<event_id>/registrations/filters/
+
+    Distinct values for the admin table's filter dropdowns — genders/
+    organisations/attendance types come from form_data (see
+    AdminRegistrationListView), so they can't be hardcoded; categories are
+    event-specific too. Small and cheap enough to just compute directly
+    rather than caching.
+    """
+
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
+
+    def get(self, request, event_id):
+        qs = Registration.objects.filter(event_id=event_id)
+
+        def distinct(key):
+            values = qs.values_list(f"form_data__{key}", flat=True).distinct()
+            return sorted({v for v in values if v})
+
+        categories = list(
+            RegistrationCategory.objects
+            .filter(event_id=event_id)
+            .values("id", "name")
+            .order_by("name")
+        )
+
+        return Response(
+            {
+                "categories": categories,
+                "genders": distinct("gender"),
+                "organisations": distinct("club_or_institution"),
+                "attendance_types": distinct("attendance_type"),
+            }
         )
 
 

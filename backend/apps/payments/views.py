@@ -421,6 +421,7 @@ class AdminDashboardView(APIView):
 
     def get(self, request, event_id):
         from django.db.models import Sum, Count
+        from django.utils import timezone
         from apps.registrations.models import Registration
 
         registrations = Registration.objects.filter(event_id=event_id)
@@ -428,6 +429,10 @@ class AdminDashboardView(APIView):
         by_status = list(
             registrations.values("status").annotate(count=Count("id"))
         )
+
+        today_count = registrations.filter(
+            registered_at__date=timezone.localdate()
+        ).count()
 
         revenue_confirmed = (
             registrations.filter(status=Registration.Status.CONFIRMED)
@@ -451,6 +456,7 @@ class AdminDashboardView(APIView):
         return Response(
             {
                 "total_registrations": registrations.count(),
+                "today_count": today_count,
                 "by_status": by_status,
                 "revenue_confirmed": str(revenue_confirmed),
                 "revenue_pending": str(revenue_pending),
