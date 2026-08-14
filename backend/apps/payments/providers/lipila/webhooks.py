@@ -4,14 +4,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from django.db import transaction
-
 from apps.payments.models import (
     Payment,
 )
 
-from apps.payments.ledger import (
-    post_successful_payment,
+from apps.payments.services import (
+    apply_payment_outcome,
 )
 
 from .security import (
@@ -112,11 +110,6 @@ class LipilaWebhookView(APIView):
             if value
         ]
 
-        event_status = (
-            data.get("status")
-            or ""
-        ).upper()
-
         payment = None
 
         for ref in candidate_refs:
@@ -147,38 +140,9 @@ class LipilaWebhookView(APIView):
         if not payment:
             return
 
-        payment.provider_response = {
-            **payment.provider_response,
-            "webhook": data,
-        }
-        payment.save(update_fields=["provider_response", "updated_at"])
-
-        from apps.registrations.models import Registration
-        from apps.notifications.services import (
-            notify_payment_confirmed,
-            notify_payment_failed,
+        apply_payment_outcome(
+            payment=payment,
+            provider_status=data.get("status") or "",
+            raw_response=data,
+            response_key="webhook",
         )
-
-        success_states = {"SUCCESS", "SUCCESSFUL", "COMPLETED", "PAID"}
-        failed_states = {"FAILED", "FAILURE", "CANCELLED", "DECLINED"}
-
-        if event_status in success_states:
-
-            with transaction.atomic():
-                payment = post_successful_payment(payment=payment)
-
-                registration = payment.registration
-                registration.status = Registration.Status.CONFIRMED
-                registration.save(update_fields=["status", "updated_at"])
-
-            notify_payment_confirmed(payment.registration)
-
-        elif event_status in failed_states:
-
-            payment.status = Payment.Status.FAILED
-            payment.save(update_fields=["status", "updated_at"])
-
-            notify_payment_failed(
-                payment.registration,
-                reason=event_status,
-            )

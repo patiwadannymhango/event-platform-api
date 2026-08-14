@@ -183,6 +183,126 @@ def initiate_card_payment(
     return payment, redirect_url
 
 
+def apply_payment_outcome(
+    *,
+    payment,
+    provider_status,
+    raw_response=None,
+    response_key="provider_check",
+):
+    """
+    Shared success/failure transition for a Payment, driven by whatever
+    Lipila reports — used by both the webhook (push, in
+    providers/lipila/webhooks.py) and sync_payment_status_from_lipila
+    below (pull, called while the frontend is polling), so a missed or
+    delayed webhook doesn't leave a payment stuck on PENDING/PROCESSING
+    forever even though Lipila already settled it on their end.
+    """
+
+    from .models import Payment as PaymentModel
+
+    if raw_response is not None:
+        payment.provider_response = {
+            **payment.provider_response,
+            response_key: raw_response,
+        }
+        payment.save(update_fields=["provider_response", "updated_at"])
+
+    settled_states = (
+        PaymentModel.Status.SUCCESS,
+        PaymentModel.Status.FAILED,
+        PaymentModel.Status.REFUNDED,
+        PaymentModel.Status.CANCELLED,
+    )
+
+    if payment.status in settled_states:
+        # Already settled — never re-process. Guards against the webhook
+        # and an active poll-time check both resolving around the same
+        # moment (would otherwise double-credit the wallet or double-send
+        # the confirmation notification).
+        return payment
+
+    provider_status = (provider_status or "").upper()
+
+    success_states = {"SUCCESS", "SUCCESSFUL", "COMPLETED", "PAID"}
+    failed_states = {"FAILED", "FAILURE", "CANCELLED", "DECLINED"}
+
+    if provider_status in success_states:
+
+        from .ledger import post_successful_payment
+        from apps.registrations.models import Registration
+
+        with transaction.atomic():
+            payment = post_successful_payment(payment=payment)
+
+            registration = payment.registration
+            registration.status = Registration.Status.CONFIRMED
+            registration.save(update_fields=["status", "updated_at"])
+
+        from apps.notifications.services import notify_payment_confirmed
+        notify_payment_confirmed(payment.registration)
+
+    elif provider_status in failed_states:
+
+        payment.status = PaymentModel.Status.FAILED
+        payment.save(update_fields=["status", "updated_at"])
+
+        from apps.notifications.services import notify_payment_failed
+        notify_payment_failed(payment.registration, reason=provider_status)
+
+    # Anything else (still pending/processing on Lipila's side — e.g. a
+    # bank still finalising a card charge) is left exactly as-is: no
+    # status flip, no notification, until a definitive outcome arrives.
+
+    return payment
+
+
+def sync_payment_status_from_lipila(payment):
+    """
+    Actively re-check a still-in-flight payment against Lipila instead of
+    only waiting on their webhook. Called from the status-polling
+    endpoint the frontend hits while showing the "waiting" screen, so a
+    payment that actually succeeded (or failed) on Lipila's side gets
+    picked up on the next poll even if the webhook for it was delayed,
+    dropped, or never sent at all — the gap that otherwise leaves the
+    frontend stuck on "waiting" after a real-world redirect-back from a
+    card payment. Safe to call on every poll: a no-op once the payment is
+    settled, and any Lipila API failure here is swallowed so a flaky
+    provider call never breaks the poll itself.
+    """
+
+    from .models import Payment as PaymentModel
+
+    if payment.status != PaymentModel.Status.PROCESSING:
+        # PENDING means no Lipila collection exists yet to check (or this
+        # is a bank transfer, which never goes through Lipila at all —
+        # those are reconciled manually against the bank statement).
+        # Anything else is already settled.
+        return payment
+
+    if payment.provider.provider_type != "LIPILA":
+        return payment
+
+    from .providers.lipila.client import LipilaAPIError
+    from .providers.lipila.services import LipilaProvider
+
+    try:
+        response = LipilaProvider().get_collection_status(
+            reference_id=payment.reference,
+        )
+    except LipilaAPIError:
+        return payment
+    except Exception:  # noqa: BLE001 — a flaky status check must never break polling
+        return payment
+
+    return apply_payment_outcome(
+        payment=payment,
+        provider_status=response.get("status", ""),
+        raw_response=response,
+        response_key="lipila_status_check",
+    )
+
+
 def get_live_balance(payment_account):
     """
     Fetch the live float balance from Lipila for a payment account.

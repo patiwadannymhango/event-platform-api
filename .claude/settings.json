@@ -7,7 +7,22 @@
       "Bash(curl -sS -X POST http://localhost:8000/api/v1/payments/public/registrations/bb7b896c-9cef-482a-80cc-8e1e3ba6b5a3/pay/ -H 'Content-Type: application/json' -d '{\"payment_method\":\"CARD\",\"city\":\"Kitwe\",\"address\":\"1 Independence Ave\",\"zip_code\":\"10101\",\"country\":\"ZM\"}')",
       "Bash(find \"C:/Users/USER/AppData/Local/Temp\" -iname \"*paste*\" -newer \"C:/Users/USER/Downloads/copperbelt-marathon-dockerized v2/copperbelt-marathon/README.md\" 2>/dev/null | head -20 *)",
       "Read(//c/Users/USER/AppData/Local/Temp/**)",
-      "Read(//c/Users/USER/AppData/Local/Temp/claude/**)"
+      "Read(//c/Users/USER/AppData/Local/Temp/claude/**)",
+      "Read(//c/Users/USER/Documents/GitHub/copperbelt-marathon-site/src/data/**)",
+      "Read(//c/Users/USER/Documents/GitHub/copperbelt-marathon-site/src/pages/**)",
+      "Read(//c/Users/USER/Documents/GitHub/copperbelt-marathon-site/src/**)",
+      "Bash(curl -s --max-time 15 https://copperbelt-marathon-site.vercel.app/ -o /tmp/index.html)",
+      "Bash(curl -s --max-time 15 https://copperbelt-marathon-site.vercel.app/assets/index-DOhNGViR.js -o /tmp/bundle.js)",
+      "Bash(cd \"C:\\\\Users\\\\USER\\\\Documents\\\\GitHub\\\\copperbelt-marathon-site\" && grep -rn \"provider\" src --include=\"*.ts*\" -i | grep -v node_modules)",
+      "Read(//c/Users/USER/Documents/GitHub/copperbelt-marathon-site/**)",
+      "Bash(cd \"C:\\\\Users\\\\USER\\\\Documents\\\\GitHub\\\\copperbelt-marathon-site\" && grep -rn \"096\\\\|097\\\\|095\\\\|detectNetwork\\\\|guessNetwork\\\\|networkFromPhone\\\\|startsWith\" src --include=\"*.ts*\")",
+      "Bash(cd \"C:\\\\Users\\\\USER\\\\Documents\\\\GitHub\\\\copperbelt-marathon-site\" && cat package.json | grep -A 15 '\"scripts\"')",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\USER\\Documents\\GitHub\\copperbelt-marathon-site\\src\\components"
     ]
   }
 }

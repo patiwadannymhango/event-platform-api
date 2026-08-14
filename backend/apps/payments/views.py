@@ -100,7 +100,14 @@ class PublicPaymentStatusView(APIView):
     GET /api/v1/payments/public/payments/<payment_id>/status/
 
     Polled by the frontend while a mobile money prompt is on the runner's
-    phone, so it knows when to stop showing the "check your phone" screen.
+    phone (or while waiting on a card payment redirect), so it knows when
+    to stop showing the "waiting" screen. Each poll also actively
+    re-verifies with Lipila (sync_payment_status_from_lipila) rather than
+    only trusting whatever the webhook has already written to our own
+    database — a card payment in particular can settle on Lipila's side
+    with the webhook for it arriving late or not at all, which otherwise
+    leaves this endpoint (and the frontend polling it) reporting PENDING
+    forever even though the transaction actually went through.
     """
 
     permission_classes = [AllowAny]
@@ -108,6 +115,7 @@ class PublicPaymentStatusView(APIView):
     def get(self, request, payment_id):
 
         from .models import Payment as PaymentModel
+        from .services import sync_payment_status_from_lipila
 
         try:
 
@@ -123,6 +131,8 @@ class PublicPaymentStatusView(APIView):
                 {"detail": "Payment not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        payment = sync_payment_status_from_lipila(payment)
 
         return Response(
             {
