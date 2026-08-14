@@ -28,7 +28,8 @@
       "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/api/**)",
       "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/context/**)",
       "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/**)",
-      "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/pages/**)"
+      "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/pages/**)",
+      "Bash(curl -s --max-time 20 \"https://raw.githubusercontent.com/mui/material-ui/master/docs/data/material/getting-started/templates/dashboard/theme/customizations/index.ts\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\USER\\Documents\\GitHub\\copperbelt-marathon-site\\src\\components",

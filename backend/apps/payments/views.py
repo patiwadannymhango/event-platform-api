@@ -530,15 +530,21 @@ class AdminWithdrawView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        withdrawal = request_withdrawal(
-            wallet=wallet,
-            amount=data["amount"],
-            destination=data["destination"],
-            destination_account=data["destination_account"],
-            recipient_name=data.get("recipient_name", ""),
-            narration=data.get("narration", ""),
-            requested_by=request.user,
-        )
+        try:
+            withdrawal = request_withdrawal(
+                wallet=wallet,
+                amount=data["amount"],
+                destination=data["destination"],
+                destination_account=data["destination_account"],
+                recipient_name=data.get("recipient_name", ""),
+                narration=data.get("narration", ""),
+                requested_by=request.user,
+            )
+        except LipilaAPIError as exc:
+            return Response(
+                {"detail": _lipila_error_message(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         return Response(
             WithdrawalSerializer(withdrawal).data,
@@ -570,15 +576,21 @@ class AdminSendMoneyView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        withdrawal = request_withdrawal(
-            wallet=wallet,
-            amount=data["amount"],
-            destination=Withdrawal.Destination.MOBILE_MONEY,
-            destination_account=data["account_number"],
-            recipient_name=data.get("recipient_name", ""),
-            narration=data.get("narration", "Manual send money"),
-            requested_by=request.user,
-        )
+        try:
+            withdrawal = request_withdrawal(
+                wallet=wallet,
+                amount=data["amount"],
+                destination=Withdrawal.Destination.MOBILE_MONEY,
+                destination_account=data["account_number"],
+                recipient_name=data.get("recipient_name", ""),
+                narration=data.get("narration", "Manual send money"),
+                requested_by=request.user,
+            )
+        except LipilaAPIError as exc:
+            return Response(
+                {"detail": _lipila_error_message(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         return Response(
             WithdrawalSerializer(withdrawal).data,
