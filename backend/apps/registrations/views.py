@@ -205,6 +205,13 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 
+from apps.common.access import (
+    EVENT_REGISTRATION_MANAGE_ROLES,
+    EVENT_VIEW_ROLES,
+    require_event_role,
+)
+from apps.common.permissions import HasEventRole
+
 from .models import RegistrationCategory
 from .serializers import (
     AdminManualRegistrationSerializer,
@@ -223,7 +230,7 @@ class AdminRegistrationListView(ListAPIView):
     table.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
     serializer_class = AdminRegistrationSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["status", "category"]
@@ -257,6 +264,29 @@ class AdminRegistrationDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = AdminRegistrationSerializer
     queryset = Registration.objects.select_related("participant", "category", "event")
 
+    def get_object(self):
+        # Not keyed by event_id in the URL (it's looked up by
+        # registration id), so the role check happens here once the
+        # event is known, rather than via a HasEventRole permission
+        # class. GET only needs view access; PATCH/DELETE (both of which
+        # call this via the generic dispatch) need registration-manage
+        # access.
+        registration = super().get_object()
+
+        required_roles = (
+            EVENT_VIEW_ROLES
+            if self.request.method == "GET"
+            else EVENT_REGISTRATION_MANAGE_ROLES
+        )
+
+        require_event_role(
+            self.request.user,
+            registration.event_id,
+            *required_roles,
+        )
+
+        return registration
+
     def patch(self, request, *args, **kwargs):
         registration = self.get_object()
 
@@ -288,7 +318,10 @@ class AdminRegistrationCreateView(APIView):
     person) but the admin can pick any status.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [
+        IsAuthenticated,
+        HasEventRole(*EVENT_REGISTRATION_MANAGE_ROLES),
+    ]
 
     def post(self, request, event_id):
         event = Event.objects.get(id=event_id)
@@ -331,7 +364,10 @@ class AdminRegistrationBulkUploadView(APIView):
     than failing the whole batch on one bad row.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [
+        IsAuthenticated,
+        HasEventRole(*EVENT_REGISTRATION_MANAGE_ROLES),
+    ]
     parser_classes = [MultiPartParser]
 
     REQUIRED_COLUMNS = ["first_name", "last_name", "category_code"]
@@ -445,7 +481,7 @@ class AdminRegistrationExportView(APIView):
     GET, so the frontend can just set window.location or an <a href>).
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
 
     COLUMNS = [
         ("Reference", lambda r: r.registration_number),

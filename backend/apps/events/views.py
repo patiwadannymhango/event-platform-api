@@ -36,6 +36,12 @@ class OrganizationEventListView(
             "organization_id"
         ]
 
+        if self.request.user.is_superuser:
+            return Event.objects.filter(
+                organization_id=organization_id,
+                is_active=True,
+            )
+
         return Event.objects.filter(
             organization_id=organization_id,
             organization__memberships__user=(

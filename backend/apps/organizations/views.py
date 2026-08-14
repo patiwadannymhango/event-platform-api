@@ -26,6 +26,9 @@ class OrganizationListView(ListAPIView):
 
     def get_queryset(self):
 
+        if self.request.user.is_superuser:
+            return Organization.objects.filter(is_active=True)
+
         return Organization.objects.filter(
             memberships__user=self.request.user,
             memberships__is_active=True,
@@ -48,6 +51,9 @@ class OrganizationDetailView(
     lookup_url_kwarg = "organization_id"
 
     def get_queryset(self):
+
+        if self.request.user.is_superuser:
+            return Organization.objects.filter(is_active=True)
 
         return Organization.objects.filter(
             memberships__user=self.request.user,

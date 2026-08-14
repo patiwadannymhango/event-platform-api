@@ -3,10 +3,17 @@ from django.conf import settings
 from rest_framework import status
 from rest_framework.permissions import (
     AllowAny,
+    IsAuthenticated,
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.access import (
+    EVENT_FINANCE_ROLES,
+    EVENT_VIEW_ROLES,
+    require_event_role,
+)
+from apps.common.permissions import HasEventRole
 from apps.registrations.models import (
     Registration,
 )
@@ -369,7 +376,7 @@ class AdminWalletBalanceView(APIView):
     returned so the dashboard doesn't just break.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
 
     def get(self, request, event_id):
         from apps.events.models import Event
@@ -403,7 +410,7 @@ class AdminDashboardView(APIView):
     status, revenue collected vs pending, and wallet balance.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
 
     def get(self, request, event_id):
         from django.db.models import Sum, Count
@@ -449,7 +456,7 @@ class AdminDashboardView(APIView):
 class AdminTransactionListView(ListAPIView):
     """GET /api/v1/payments/admin/events/<event_id>/transactions/"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
     serializer_class = TransactionSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["transaction_type", "direction", "status"]
@@ -465,7 +472,7 @@ class AdminTransactionListView(ListAPIView):
 class AdminPaymentListView(ListAPIView):
     """GET /api/v1/payments/admin/events/<event_id>/payments/"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
     serializer_class = PaymentSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["status", "payment_method"]
@@ -481,7 +488,7 @@ class AdminPaymentListView(ListAPIView):
 class AdminWithdrawalListView(ListAPIView):
     """GET /api/v1/payments/admin/events/<event_id>/withdrawals/"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
     serializer_class = WithdrawalSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["status", "destination"]
@@ -501,7 +508,7 @@ class AdminWithdrawView(APIView):
     (or record a bank/cash withdrawal for manual reconciliation).
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_FINANCE_ROLES)]
 
     def post(self, request, event_id):
         serializer = WithdrawalRequestSerializer(data=request.data)
@@ -541,7 +548,7 @@ class AdminSendMoneyView(APIView):
     appears in the same audit trail.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_FINANCE_ROLES)]
 
     def post(self, request, event_id):
         serializer = SendMoneySerializer(data=request.data)
@@ -579,12 +586,23 @@ class AdminRefundPaymentView(APIView):
 
     def post(self, request, payment_id):
         try:
-            payment = PaymentModel.objects.get(id=payment_id)
+            payment = PaymentModel.objects.select_related(
+                "registration"
+            ).get(id=payment_id)
         except PaymentModel.DoesNotExist:
             return Response(
                 {"detail": "Payment not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        # Not keyed by event_id in the URL, so the role check has to
+        # happen here rather than via a HasEventRole permission class —
+        # same pattern EventDetailView.get_object() uses.
+        require_event_role(
+            request.user,
+            payment.registration.event_id,
+            *EVENT_FINANCE_ROLES,
+        )
 
         if payment.status != PaymentModel.Status.SUCCESS:
             return Response(

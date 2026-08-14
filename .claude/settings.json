@@ -19,7 +19,16 @@
       "Bash(cd \"C:\\\\Users\\\\USER\\\\Documents\\\\GitHub\\\\copperbelt-marathon-site\" && cat package.json | grep -A 15 '\"scripts\"')",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(ssh -i /c/Users/USER/Desktop/Keys/event-platform.pem -o ConnectTimeout=10 ubuntu@15.240.170.199 'cd event-platform-api && docker compose --env-file .env.prod -f docker-compose.prod.yml ps')",
+      "Bash(curl -s -o /dev/null -w \"\\\\nAPI HTTP %{http_code}\\\\n\" --max-time 10 https://15-240-170-199.sslip.io/api/v1/registrations/public/events/8f604ed1-5630-4600-a54b-114e75def338/form/)",
+      "Bash(cd \"C:\\\\Users\\\\USER\\\\Documents\\\\GitHub\\\\event-platform-admin\" && ls -la && echo \"---PACKAGE---\" && cat package.json)",
+      "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/**)",
+      "Bash(cd \"C:\\\\Users\\\\USER\\\\Documents\\\\GitHub\\\\event-platform-admin\" && find src -type f | sort)",
+      "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/api/**)",
+      "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/context/**)",
+      "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/**)",
+      "Read(//c/Users/USER/Documents/GitHub/event-platform-admin/src/pages/**)"
     ],
     "additionalDirectories": [
       "C:\\Users\\USER\\Documents\\GitHub\\copperbelt-marathon-site\\src\\components"
