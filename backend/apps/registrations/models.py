@@ -225,7 +225,7 @@ class Registration(UUIDModel):
         DRAFT = "DRAFT", "Draft"
 
         PENDING_PAYMENT = (
-            "PENDING_PAYMENT_TEs",
+            "PENDING_PAYMENT",
             "Pending Payment",
         )
 
