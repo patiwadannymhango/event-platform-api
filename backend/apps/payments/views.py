@@ -420,10 +420,7 @@ class AdminDashboardView(APIView):
     permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
 
     def get(self, request, event_id):
-        from datetime import timedelta
-
         from django.db.models import Sum, Count
-        from django.db.models.functions import TruncDate
         from django.utils import timezone
         from apps.registrations.models import Registration
 
@@ -456,56 +453,6 @@ class AdminDashboardView(APIView):
 
         wallet, _ = Wallet.objects.get_or_create(event_id=event_id)
 
-        # --- Chart data (admin dashboards) ---
-
-        since = timezone.localdate() - timedelta(days=13)  # 14 days, inclusive of today
-
-        daily_qs = (
-            registrations
-            .filter(registered_at__date__gte=since)
-            .annotate(day=TruncDate("registered_at"))
-            .values("day", "status")
-            .annotate(count=Count("id"))
-        )
-
-        daily_buckets = {}
-        for row in daily_qs:
-            bucket = daily_buckets.setdefault(
-                row["day"].isoformat(), {"confirmed": 0, "other": 0}
-            )
-            if row["status"] == Registration.Status.CONFIRMED:
-                bucket["confirmed"] += row["count"]
-            else:
-                bucket["other"] += row["count"]
-
-        daily_registrations = []
-        for offset in range(14):
-            day = (since + timedelta(days=offset)).isoformat()
-            bucket = daily_buckets.get(day, {"confirmed": 0, "other": 0})
-            daily_registrations.append({"date": day, **bucket})
-
-        by_category = [
-            {"name": row["category__name"], "count": row["count"]}
-            for row in (
-                registrations
-                .values("category__name")
-                .annotate(count=Count("id"))
-                .order_by("-count")
-            )
-        ]
-
-        by_country = [
-            {"country": row["form_data__country"], "count": row["count"]}
-            for row in (
-                registrations
-                .exclude(form_data__country__isnull=True)
-                .exclude(form_data__country="")
-                .values("form_data__country")
-                .annotate(count=Count("id"))
-                .order_by("-count")
-            )
-        ]
-
         return Response(
             {
                 "total_registrations": registrations.count(),
@@ -515,9 +462,6 @@ class AdminDashboardView(APIView):
                 "revenue_pending": str(revenue_pending),
                 "wallet_balance": str(wallet.balance),
                 "wallet_pending_balance": str(wallet.pending_balance),
-                "daily_registrations": daily_registrations,
-                "by_category": by_category,
-                "by_country": by_country,
             }
         )
 
