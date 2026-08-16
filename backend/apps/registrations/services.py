@@ -82,27 +82,33 @@ def generate_registration_number(
         .upper()[:6]
     )
 
-    last_registration = (
+    # Scanning every existing number for the max (rather than trusting the
+    # most-recently-registered row) means a single malformed/blank
+    # registration_number can't get "stuck" as the reference point and
+    # keep producing the same already-taken number on every subsequent
+    # attempt.
+    last_number = 0
+
+    existing_numbers = (
         Registration.objects
         .filter(event=event)
-        .order_by("-registered_at")
-        .first()
+        .exclude(registration_number="")
+        .values_list("registration_number", flat=True)
     )
 
-    if last_registration:
+    for registration_number in existing_numbers:
         try:
-            last_number = int(
-                last_registration
-                .registration_number
-                .split("-")[-1]
+            number = int(
+                registration_number
+                .rsplit("-", 1)[-1]
             )
         except (
             ValueError,
             IndexError,
         ):
-            last_number = 0
-    else:
-        last_number = 0
+            continue
+
+        last_number = max(last_number, number)
 
     next_number = last_number + 1
 
