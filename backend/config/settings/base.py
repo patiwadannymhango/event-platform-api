@@ -77,6 +77,20 @@ PUBLIC_BASE_URL = config(
     default="",
 ).rstrip("/")
 
+# The public registration site's URL — used for links inside outgoing
+# emails (e.g. the "track your registration" button). Separate from
+# PUBLIC_BASE_URL, which points at this backend, not the frontend.
+PUBLIC_SITE_URL = config(
+    "PUBLIC_SITE_URL",
+    default="",
+).rstrip("/")
+
+# Shown in the footer of outgoing emails.
+EVENT_CONTACT_PHONE = config(
+    "EVENT_CONTACT_PHONE",
+    default="",
+)
+
 INSTALLED_APPS = [
     # Django
     "django.contrib.admin",
