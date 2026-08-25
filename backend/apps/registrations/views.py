@@ -362,6 +362,29 @@ class AdminRegistrationDetailView(RetrieveUpdateDestroyAPIView):
 
         return Response(AdminRegistrationSerializer(registration).data)
 
+    def perform_destroy(self, instance):
+        # Payment.registration is on_delete=PROTECT, so instance.delete()
+        # below would 500 with an unhandled ProtectedError for almost any
+        # registration that ever attempted a payment — which is most of
+        # them. Refuse to delete one with a real successful payment (that
+        # would destroy actual revenue history — cancel/refund it
+        # instead), but clear out failed/abandoned payment attempts so
+        # deleting an abandoned or duplicate registration actually works.
+        from rest_framework.exceptions import ValidationError
+
+        from apps.payments.models import Payment
+
+        if Payment.objects.filter(
+            registration=instance, status=Payment.Status.SUCCESS
+        ).exists():
+            raise ValidationError(
+                "This registration has a successful payment and can't be "
+                "deleted — cancel or refund it instead."
+            )
+
+        Payment.objects.filter(registration=instance).delete()
+        instance.delete()
+
 
 class AdminRegistrationCreateView(APIView):
     """
