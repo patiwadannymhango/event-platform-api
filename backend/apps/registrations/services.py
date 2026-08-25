@@ -99,12 +99,19 @@ def generate_registration_number(
     # registration_number can't get "stuck" as the reference point and
     # keep producing the same already-taken number on every subsequent
     # attempt.
+    #
+    # Scoped by prefix match rather than by event: registration_number is
+    # globally unique (not unique-per-event), and two events can easily
+    # end up with the same 6-character prefix (e.g. "copperbelt-marathon-
+    # 2026" and "copperbelt-marathon-2026-vendors" both truncate to
+    # "COPPER") — scanning only this event's own registrations would find
+    # zero and confidently hand out an already-taken number the moment a
+    # second event shares a prefix.
     last_number = 0
 
     existing_numbers = (
         Registration.objects
-        .filter(event=event)
-        .exclude(registration_number="")
+        .filter(registration_number__startswith=f"{prefix}-")
         .values_list("registration_number", flat=True)
     )
 

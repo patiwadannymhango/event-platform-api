@@ -63,9 +63,14 @@ class Command(BaseCommand):
             organization=organization, provider=provider
         )
 
+        # Deliberately not "copperbelt-marathon-2026-vendors" — that
+        # truncates to the same 6-character registration_number prefix
+        # ("COPPER") as the runner event and collides with it the moment
+        # anyone registers. See generate_registration_number()'s docstring
+        # in services.py for the full story.
         event, created = Event.objects.get_or_create(
             organization=organization,
-            slug="copperbelt-marathon-2026-vendors",
+            slug="cbm-vendors-2026",
             defaults={
                 "name": "Copperbelt Marathon 2026 — Vendor & Exhibitor Registration",
                 "description": (
