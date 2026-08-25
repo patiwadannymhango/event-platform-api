@@ -537,14 +537,32 @@ class AdminRegistrationExportView(APIView):
 
     permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
 
+    # A mix of runner-form and vendor-form fields (both live in the same
+    # form_data JSON blob, just under different keys per event) — using
+    # .get() with a blank default means each event's registrations just
+    # leave the other event's columns empty rather than needing a
+    # per-event column configuration.
     COLUMNS = [
         ("Reference", lambda r: r.registration_number),
-        ("Status", lambda r: r.status),
+        ("Status", lambda r: r.get_status_display()),
         ("First name", lambda r: r.participant.first_name),
         ("Last name", lambda r: r.participant.last_name),
         ("Email", lambda r: r.participant.email),
         ("Phone", lambda r: r.participant.phone),
         ("Category", lambda r: r.category.name),
+        ("Gender", lambda r: r.form_data.get("gender", "")),
+        ("Age range", lambda r: r.form_data.get("age_range", "")),
+        ("Country", lambda r: r.form_data.get("country", "")),
+        ("T-shirt size", lambda r: r.form_data.get("tshirt_size", "")),
+        ("Attendance", lambda r: r.form_data.get("attendance_type", "")),
+        ("Organisation", lambda r: r.form_data.get("club_or_institution", "")),
+        ("Emergency contact name", lambda r: r.form_data.get("emergency_contact_name", "")),
+        ("Emergency contact phone", lambda r: r.form_data.get("emergency_contact_phone", "")),
+        ("Medical notes", lambda r: r.form_data.get("medical_notes", "")),
+        ("Business name", lambda r: r.form_data.get("business_name", "")),
+        ("Business location", lambda r: r.form_data.get("business_location", "")),
+        ("Products / services", lambda r: r.form_data.get("products_services", "")),
+        ("Exhibition / activation requirement", lambda r: r.form_data.get("requirement", "")),
         ("Amount", lambda r: float(r.amount)),
         ("Currency", lambda r: r.currency),
         ("Registered at", lambda r: r.registered_at.replace(tzinfo=None) if r.registered_at else None),
