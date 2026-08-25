@@ -39,11 +39,16 @@ def create_registration(
         ),
     )
 
-    status = (
-        Registration.Status.RESERVED
-        if reserve
-        else Registration.Status.PENDING_PAYMENT
-    )
+    # A free category (price 0 — e.g. an "Official Sponsor" entry) has
+    # nothing to pay, and payments can't process a K0 charge anyway, so
+    # it goes straight to CONFIRMED instead of waiting on a payment that
+    # will never come.
+    if category.price <= 0:
+        status = Registration.Status.CONFIRMED
+    elif reserve:
+        status = Registration.Status.RESERVED
+    else:
+        status = Registration.Status.PENDING_PAYMENT
 
     registration = Registration.objects.create(
         participant=participant,
@@ -60,14 +65,21 @@ def create_registration(
         form_data=form_data,
     )
 
-    from apps.notifications.services import (
-        notify_registration_received,
-    )
+    if status == Registration.Status.CONFIRMED:
+        from apps.notifications.services import (
+            notify_payment_confirmed,
+        )
 
-    notify_registration_received(
-        registration,
-        reserved=reserve,
-    )
+        notify_payment_confirmed(registration)
+    else:
+        from apps.notifications.services import (
+            notify_registration_received,
+        )
+
+        notify_registration_received(
+            registration,
+            reserved=reserve,
+        )
 
     return registration
 
