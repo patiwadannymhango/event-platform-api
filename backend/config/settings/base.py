@@ -282,6 +282,14 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv(),
 )
 
+# Any subdomain of copperbeltmarathon2026.com (bare domain, www, and any
+# custom subdomain — main-admin, view, and whatever gets added later) is
+# trusted automatically, so a new Vercel subdomain never needs a backend
+# env var change/redeploy to be able to call this API.
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://([a-z0-9-]+\.)*copperbeltmarathon2026\.com$",
+]
+
 REDIS_URL = config(
     "REDIS_URL",
     default="redis://localhost:6379/0",
