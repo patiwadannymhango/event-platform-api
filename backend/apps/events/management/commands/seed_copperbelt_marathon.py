@@ -23,14 +23,14 @@ from apps.registrations.models import (
 
 
 CATEGORIES = [
-    {"code": "full-marathon", "name": "Full Marathon", "distance": "42.195 KM", "price": 2},
-    {"code": "half-marathon", "name": "Half Marathon", "distance": "21.1 KM", "price": 2},
-    {"code": "10k", "name": "10K", "distance": "10 KM", "price": 2},
-    {"code": "5k-fun-run", "name": "Fun Run & Walk", "distance": "5 KM", "price": 2},
-    {"code": "mining-challenge", "name": "Mining Challenge", "distance": "", "price": 2},
-    {"code": "differently-abled", "name": "Differently Abled Challenge", "distance": "", "price": 2},
-    {"code": "schools-youth", "name": "Schools & Youth Challenge", "distance": "5 KM", "price": 2},
-    {"code": "veterans", "name": "Veterans Challenge", "distance": "10 KM", "price": 2},
+    {"code": "full-marathon", "name": "Full Marathon", "distance": "42.195 KM", "price": 400},
+    {"code": "half-marathon", "name": "Half Marathon", "distance": "21.1 KM", "price": 300},
+    {"code": "10k", "name": "10K", "distance": "10 KM", "price": 295},
+    {"code": "5k-fun-run", "name": "Fun Run & Walk", "distance": "5 KM", "price": 279},
+    {"code": "mining-challenge", "name": "Mining Challenge", "distance": "", "price": 279},
+    {"code": "differently-abled", "name": "Differently Abled Challenge", "distance": "", "price": 279},
+    {"code": "schools-youth", "name": "Schools & Youth Challenge", "distance": "5 KM", "price": 279},
+    {"code": "veterans", "name": "Veterans Challenge", "distance": "10 KM", "price": 279},
 ]
 
 FIELDS = [
@@ -104,8 +104,14 @@ class Command(BaseCommand):
 
         Wallet.objects.get_or_create(event=event, defaults={"currency": "ZMW"})
 
+        # This command re-runs on every container boot (see
+        # docker-entrypoint.sh), so `price` — live operational data an
+        # admin may have changed since the initial seed — is only ever
+        # set when a category is first created here, never touched again
+        # on later runs. Only `name`/`description` (code-owned, safe to
+        # keep in sync) get refreshed every time.
         for cat in CATEGORIES:
-            RegistrationCategory.objects.update_or_create(
+            category, created = RegistrationCategory.objects.get_or_create(
                 event=event,
                 code=cat["code"],
                 defaults={
@@ -115,6 +121,10 @@ class Command(BaseCommand):
                     "currency": "ZMW",
                 },
             )
+            if not created:
+                category.name = cat["name"]
+                category.description = cat["distance"]
+                category.save(update_fields=["name", "description"])
 
         form, _ = RegistrationForm.objects.get_or_create(
             event=event,
