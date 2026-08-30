@@ -198,6 +198,7 @@ import re
 import openpyxl
 from openpyxl.utils import get_column_letter
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_datetime
 
 from rest_framework import filters
@@ -388,6 +389,76 @@ class AdminRegistrationDetailView(RetrieveUpdateDestroyAPIView):
 
         Payment.objects.filter(registration=instance).delete()
         instance.delete()
+
+
+class AdminRegistrationEditView(APIView):
+    """
+    PATCH /api/v1/registrations/admin/registrations/<id>/details/
+
+    Lets an admin correct participant/form_data fields on an existing
+    registration — same field set as the manual "Add person" form and
+    bulk upload, minus email: deliberately not editable here. Once a
+    registration exists, its email is where every notification for it
+    has gone and will go; letting it be changed here could quietly
+    redirect a paid registration to a different inbox.
+
+    Separate from AdminRegistrationDetailView.patch() (which only
+    changes status) so status-change logic — including the "you're
+    confirmed" notification — is untouched by this endpoint.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    PARTICIPANT_FIELDS = ["first_name", "last_name", "phone"]
+    FORM_DATA_FIELDS = [
+        "gender", "age_range", "country", "tshirt_size", "attendance_type",
+        "club_or_institution", "emergency_contact_name", "emergency_contact_phone",
+        "medical_notes",
+    ]
+
+    def patch(self, request, pk):
+        registration = get_object_or_404(
+            Registration.objects.select_related("participant", "category", "event"),
+            pk=pk,
+        )
+        require_event_role(
+            request.user, registration.event_id, *EVENT_REGISTRATION_MANAGE_ROLES
+        )
+
+        if "email" in request.data:
+            return Response(
+                {"detail": "Email address cannot be changed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        participant_updates = {
+            f: (request.data[f] or "").strip()
+            for f in self.PARTICIPANT_FIELDS
+            if f in request.data
+        }
+
+        for name_field in ("first_name", "last_name"):
+            if name_field in participant_updates and not participant_updates[name_field]:
+                return Response(
+                    {"detail": f"{name_field.replace('_', ' ').title()} can't be blank."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if participant_updates:
+            for field, value in participant_updates.items():
+                setattr(registration.participant, field, value)
+            registration.participant.save(
+                update_fields=[*participant_updates.keys(), "updated_at"]
+            )
+
+        form_data_updates = {
+            f: request.data[f] for f in self.FORM_DATA_FIELDS if f in request.data
+        }
+        if form_data_updates:
+            registration.form_data = {**registration.form_data, **form_data_updates}
+            registration.save(update_fields=["form_data", "updated_at"])
+
+        return Response(AdminRegistrationSerializer(registration).data)
 
 
 class AdminRegistrationCreateView(APIView):
