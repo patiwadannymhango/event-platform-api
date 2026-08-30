@@ -446,7 +446,11 @@ class AdminRegistrationBulkUploadView(APIView):
     reject it.
 
     Row columns: first_name, last_name, email, phone, category_code,
-    status (optional, defaults to CONFIRMED).
+    status (optional, defaults to CONFIRMED), plus the same optional
+    extra fields the admin's manual "Add person" form collects — gender,
+    age_range, country, tshirt_size, attendance_type, club_or_institution,
+    emergency_contact_name, emergency_contact_phone, medical_notes — all
+    stored in form_data exactly like a manual registration would.
 
     Returns a report of created rows and any rows that failed, rather
     than failing the whole batch on one bad row.
@@ -459,6 +463,25 @@ class AdminRegistrationBulkUploadView(APIView):
     parser_classes = [MultiPartParser, JSONParser]
 
     REQUIRED_COLUMNS = ["first_name", "last_name", "category_code"]
+    FORM_DATA_COLUMNS = [
+        "gender",
+        "age_range",
+        "country",
+        "tshirt_size",
+        "attendance_type",
+        "club_or_institution",
+        "emergency_contact_name",
+        "emergency_contact_phone",
+        "medical_notes",
+    ]
+    # Only the fields with a fixed set of valid values get a (non-blocking)
+    # warning on mismatch — the rest are free text.
+    KNOWN_VALUES = {
+        "gender": {"male", "female"},
+        "age_range": {"Under 18", "18-29", "30-39", "40-49", "50-59", "60+"},
+        "tshirt_size": {"XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"},
+        "attendance_type": {"in-person", "virtual"},
+    }
     EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
     def post(self, request, event_id):
@@ -531,6 +554,13 @@ class AdminRegistrationBulkUploadView(APIView):
                 else:
                     seen_emails[email.lower()] = index
 
+            for field, known in self.KNOWN_VALUES.items():
+                value = row.get(field, "")
+                if value and value not in known:
+                    row_warnings.append(
+                        f"'{value}' isn't one of the usual {field} values ({', '.join(sorted(known))}) — check spelling/casing"
+                    )
+
             if row_errors:
                 errors.append({"row": index, "error": "; ".join(row_errors)})
                 results.append(
@@ -544,6 +574,10 @@ class AdminRegistrationBulkUploadView(APIView):
                 )
                 continue
 
+            form_data = {
+                field: row[field] for field in self.FORM_DATA_COLUMNS if row.get(field)
+            }
+
             try:
                 registration = create_registration(
                     event=event,
@@ -554,7 +588,7 @@ class AdminRegistrationBulkUploadView(APIView):
                         "email": row.get("email", ""),
                         "phone": row.get("phone", ""),
                     },
-                    form_data={},
+                    form_data=form_data,
                     reserve=False,
                 )
 
@@ -659,7 +693,14 @@ class AdminRegistrationBulkUploadTemplateView(APIView):
         HasEventRole(*EVENT_REGISTRATION_MANAGE_ROLES),
     ]
 
-    COLUMNS = ["first_name", "last_name", "email", "phone", "category_code", "status"]
+    # Same core columns as before, plus every optional field the admin's
+    # manual "Add person" form collects — same field set, same order.
+    COLUMNS = [
+        "first_name", "last_name", "email", "phone", "category_code", "status",
+        "gender", "age_range", "country", "tshirt_size", "attendance_type",
+        "club_or_institution", "emergency_contact_name", "emergency_contact_phone",
+        "medical_notes",
+    ]
 
     def get(self, request, event_id):
         event = Event.objects.get(id=event_id)
@@ -676,8 +717,16 @@ class AdminRegistrationBulkUploadTemplateView(APIView):
 
         example_code = categories[0].code if categories else ""
         examples = [
-            ["Jane", "Mwansa", "jane.mwansa@example.com", "0977000000", example_code, "CONFIRMED"],
-            ["John", "Banda", "", "0966000000", example_code, "PENDING_PAYMENT"],
+            [
+                "Jane", "Mwansa", "jane.mwansa@example.com", "0977000000", example_code, "CONFIRMED",
+                "female", "30-39", "Zambia", "M", "in-person",
+                "Copperbelt Runners Club", "John Mwansa", "0977111222", "",
+            ],
+            [
+                "John", "Banda", "", "0966000000", example_code, "PENDING_PAYMENT",
+                "male", "18-29", "Zambia", "L", "in-person",
+                "", "", "", "",
+            ],
         ]
         for row_index, example in enumerate(examples, start=2):
             for col_index, value in enumerate(example, start=1):
