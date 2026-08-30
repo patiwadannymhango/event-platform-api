@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    AdminRegistrationBulkUploadPreviewView,
+    AdminRegistrationBulkUploadTemplateView,
     AdminRegistrationBulkUploadView,
     AdminRegistrationCreateView,
     AdminRegistrationDetailView,
@@ -48,6 +50,16 @@ urlpatterns = [
         "admin/events/<uuid:event_id>/registrations/bulk-upload/",
         AdminRegistrationBulkUploadView.as_view(),
         name="admin-registration-bulk-upload",
+    ),
+    path(
+        "admin/events/<uuid:event_id>/registrations/bulk-upload/preview/",
+        AdminRegistrationBulkUploadPreviewView.as_view(),
+        name="admin-registration-bulk-upload-preview",
+    ),
+    path(
+        "admin/events/<uuid:event_id>/registrations/bulk-upload/template/",
+        AdminRegistrationBulkUploadTemplateView.as_view(),
+        name="admin-registration-bulk-upload-template",
     ),
     path(
         "admin/events/<uuid:event_id>/registrations/export/",

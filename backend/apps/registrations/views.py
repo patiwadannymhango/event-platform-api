@@ -193,6 +193,7 @@ class PublicRegistrationLookupView(APIView):
 
 import csv
 import io
+import re
 
 import openpyxl
 from openpyxl.utils import get_column_letter
@@ -201,7 +202,7 @@ from django.utils.dateparse import parse_datetime
 
 from rest_framework import filters
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -288,10 +289,13 @@ class AdminRegistrationFilterOptionsView(APIView):
             values = qs.values_list(f"form_data__{key}", flat=True).distinct()
             return sorted({v for v in values if v})
 
+        # code/price/currency included so the admin's bulk-upload feature
+        # can build its downloadable template and category-code guide from
+        # this same call, rather than needing a second endpoint.
         categories = list(
             RegistrationCategory.objects
             .filter(event_id=event_id)
-            .values("id", "name")
+            .values("id", "name", "code", "price", "currency")
             .order_by("name")
         )
 
@@ -433,9 +437,16 @@ class AdminRegistrationBulkUploadView(APIView):
     """
     POST /api/v1/registrations/admin/events/<event_id>/registrations/bulk-upload/
 
-    Accepts a CSV or XLSX file (multipart field name "file") with columns:
-    first_name, last_name, email, phone, category_code, status (optional,
-    defaults to CONFIRMED).
+    Accepts EITHER a CSV/XLSX file (multipart field name "file") OR a JSON
+    body {"rows": [...]} — the latter is what the admin's bulk-upload
+    review screen sends once the admin has previewed/edited rows (see
+    AdminRegistrationBulkUploadPreviewView below); both paths run through
+    the exact same row-by-row validation and creation logic here, so the
+    preview can never say a row is fine when the real commit would then
+    reject it.
+
+    Row columns: first_name, last_name, email, phone, category_code,
+    status (optional, defaults to CONFIRMED).
 
     Returns a report of created rows and any rows that failed, rather
     than failing the whole batch on one bad row.
@@ -445,22 +456,38 @@ class AdminRegistrationBulkUploadView(APIView):
         IsAuthenticated,
         HasEventRole(*EVENT_REGISTRATION_MANAGE_ROLES),
     ]
-    parser_classes = [MultiPartParser]
+    parser_classes = [MultiPartParser, JSONParser]
 
     REQUIRED_COLUMNS = ["first_name", "last_name", "category_code"]
+    EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
     def post(self, request, event_id):
         event = Event.objects.get(id=event_id)
         upload = request.FILES.get("file")
 
-        if not upload:
-            return Response(
-                {"detail": "Attach a file under the 'file' field."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if upload:
+            rows = self._parse_rows(upload)
+        else:
+            rows = request.data.get("rows")
+            if not isinstance(rows, list):
+                return Response(
+                    {"detail": "Attach a file under the 'file' field, or POST {'rows': [...]}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        rows = self._parse_rows(upload)
+        report = self._process_rows(event, rows, commit=True)
 
+        return Response(
+            report,
+            status=status.HTTP_201_CREATED if report["created_count"] else status.HTTP_400_BAD_REQUEST,
+        )
+
+    def _process_rows(self, event, rows, commit):
+        """
+        Shared by the real upload (commit=True, actually creates
+        registrations) and the preview endpoint (commit=False, only
+        reports what *would* happen) so the two can never disagree.
+        """
         categories = {
             c.code: c
             for c in RegistrationCategory.objects.filter(event=event)
@@ -468,18 +495,52 @@ class AdminRegistrationBulkUploadView(APIView):
 
         created = []
         errors = []
+        results = []
+        seen_emails = {}
 
-        for index, row in enumerate(rows, start=2):  # header is row 1
+        for index, raw_row in enumerate(rows, start=2):  # header is row 1
+            row = {
+                (k or "").strip().lower(): ("" if v is None else str(v).strip())
+                for k, v in (raw_row or {}).items()
+            }
+
+            row_errors = []
+            row_warnings = []
 
             missing = [c for c in self.REQUIRED_COLUMNS if not row.get(c)]
             if missing:
-                errors.append({"row": index, "error": f"Missing: {', '.join(missing)}"})
+                row_errors.append(f"Missing required field(s): {', '.join(missing)}")
+
+            category = None
+            code = row.get("category_code", "")
+            if code:
+                category = categories.get(code)
+                if not category:
+                    row_errors.append(f"Unknown category_code '{code}'")
+
+            desired_status = (row.get("status") or "CONFIRMED").upper()
+            if desired_status not in Registration.Status.values:
+                row_errors.append(f"Unknown status '{desired_status}'")
+
+            email = row.get("email", "")
+            if email:
+                if not self.EMAIL_RE.match(email):
+                    row_warnings.append(f"'{email}' doesn't look like a valid email")
+                elif email.lower() in seen_emails:
+                    row_warnings.append(f"Duplicate email — also row {seen_emails[email.lower()]}")
+                else:
+                    seen_emails[email.lower()] = index
+
+            if row_errors:
+                errors.append({"row": index, "error": "; ".join(row_errors)})
+                results.append(
+                    {"row": index, "valid": False, "errors": row_errors, "warnings": row_warnings, "data": row}
+                )
                 continue
 
-            category = categories.get(row["category_code"])
-            if not category:
-                errors.append(
-                    {"row": index, "error": f"Unknown category_code '{row['category_code']}'"}
+            if not commit:
+                results.append(
+                    {"row": index, "valid": True, "errors": [], "warnings": row_warnings, "data": row}
                 )
                 continue
 
@@ -497,25 +558,32 @@ class AdminRegistrationBulkUploadView(APIView):
                     reserve=False,
                 )
 
-                desired_status = (row.get("status") or "CONFIRMED").upper()
-                if desired_status in Registration.Status.values and desired_status != registration.status:
+                if desired_status != registration.status:
                     registration.status = desired_status
                     registration.save(update_fields=["status", "updated_at"])
 
                 created.append(registration.registration_number)
+                results.append(
+                    {
+                        "row": index,
+                        "valid": True,
+                        "errors": [],
+                        "warnings": row_warnings,
+                        "reference": registration.registration_number,
+                    }
+                )
 
             except Exception as exc:  # noqa: BLE001
                 errors.append({"row": index, "error": str(exc)})
+                results.append({"row": index, "valid": False, "errors": [str(exc)], "warnings": row_warnings, "data": row})
 
-        return Response(
-            {
-                "created_count": len(created),
-                "created_references": created,
-                "error_count": len(errors),
-                "errors": errors,
-            },
-            status=status.HTTP_201_CREATED if created else status.HTTP_400_BAD_REQUEST,
-        )
+        return {
+            "created_count": len(created),
+            "created_references": created,
+            "error_count": len(errors),
+            "errors": errors,
+            "results": results,
+        }
 
     def _parse_rows(self, upload):
         filename = (upload.name or "").lower()
@@ -547,6 +615,98 @@ class AdminRegistrationBulkUploadView(APIView):
             rows.append(row)
 
         return rows
+
+
+class AdminRegistrationBulkUploadPreviewView(AdminRegistrationBulkUploadView):
+    """
+    POST /api/v1/registrations/admin/events/<event_id>/registrations/bulk-upload/preview/
+
+    Same file parsing + validation as the real bulk upload (inherits its
+    permission check and REQUIRED_COLUMNS), but creates nothing — it's a
+    dry run so the admin can review and fix rows in the browser first.
+    Always takes a file (the very first step, before any editing exists
+    to send back as rows).
+    """
+
+    def post(self, request, event_id):
+        event = Event.objects.get(id=event_id)
+        upload = request.FILES.get("file")
+
+        if not upload:
+            return Response(
+                {"detail": "Attach a file under the 'file' field."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rows = self._parse_rows(upload)
+        report = self._process_rows(event, rows, commit=False)
+
+        return Response(report)
+
+
+class AdminRegistrationBulkUploadTemplateView(APIView):
+    """
+    GET /api/v1/registrations/admin/events/<event_id>/registrations/bulk-upload/template/
+
+    A ready-to-fill .xlsx for the bulk-upload feature: the exact header
+    row AdminRegistrationBulkUploadView expects, two worked examples using
+    this event's real category codes, and a second sheet listing every
+    valid category code/name/price so the admin isn't guessing at codes.
+    """
+
+    permission_classes = [
+        IsAuthenticated,
+        HasEventRole(*EVENT_REGISTRATION_MANAGE_ROLES),
+    ]
+
+    COLUMNS = ["first_name", "last_name", "email", "phone", "category_code", "status"]
+
+    def get(self, request, event_id):
+        event = Event.objects.get(id=event_id)
+        categories = list(
+            RegistrationCategory.objects.filter(event=event).order_by("name")
+        )
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "Registrations"
+
+        for col_index, header in enumerate(self.COLUMNS, start=1):
+            sheet.cell(row=1, column=col_index, value=header)
+
+        example_code = categories[0].code if categories else ""
+        examples = [
+            ["Jane", "Mwansa", "jane.mwansa@example.com", "0977000000", example_code, "CONFIRMED"],
+            ["John", "Banda", "", "0966000000", example_code, "PENDING_PAYMENT"],
+        ]
+        for row_index, example in enumerate(examples, start=2):
+            for col_index, value in enumerate(example, start=1):
+                sheet.cell(row=row_index, column=col_index, value=value)
+
+        for col_index in range(1, len(self.COLUMNS) + 1):
+            sheet.column_dimensions[get_column_letter(col_index)].width = 22
+
+        codes_sheet = workbook.create_sheet("Category Codes")
+        codes_sheet.append(["Category", "Code", "Price", "Currency"])
+        for category in categories:
+            codes_sheet.append(
+                [category.name, category.code, float(category.price), category.currency]
+            )
+        for col_index in range(1, 5):
+            codes_sheet.column_dimensions[get_column_letter(col_index)].width = 26
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+
+        response = HttpResponse(
+            buffer.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="{event.slug}-bulk-upload-template.xlsx"'
+        )
+        return response
 
 
 class AdminRegistrationExportView(APIView):
