@@ -592,9 +592,25 @@ class AdminRegistrationBulkUploadView(APIView):
                     reserve=False,
                 )
 
+                old_status = registration.status
                 if desired_status != registration.status:
                     registration.status = desired_status
                     registration.save(update_fields=["status", "updated_at"])
+
+                # create_registration() already sent the right notification
+                # for whatever status it computed on its own (a "pending
+                # payment" SMS, or — for an already-free category — the
+                # confirmation email+SMS below). But bulk upload can then
+                # override that status afterwards (e.g. importing rows
+                # that were already paid in cash), and a plain .save()
+                # doesn't know to notify anyone. Send the same "you're
+                # confirmed" email+SMS the public site sends on a real
+                # payment, exactly like AdminRegistrationDetailView.patch()
+                # already does for the same kind of manual confirmation.
+                if desired_status == Registration.Status.CONFIRMED and old_status != desired_status:
+                    from apps.notifications.services import notify_payment_confirmed
+
+                    notify_payment_confirmed(registration)
 
                 created.append(registration.registration_number)
                 results.append(
