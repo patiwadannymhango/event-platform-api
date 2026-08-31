@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 from apps.common.models import UUIDModel
@@ -259,6 +260,18 @@ class Registration(UUIDModel):
             "Refunded",
         )
 
+    class CreatedVia(models.TextChoices):
+
+        PUBLIC = "PUBLIC", "Public site"
+
+        ADMIN = "ADMIN", "Admin dashboard"
+
+        # Registrations created before this field existed. Never set by
+        # any code path going forward — only ever the migration's default
+        # for pre-existing rows, so old data reads as honestly unknown
+        # rather than being guessed at and mislabeled.
+        UNKNOWN = "UNKNOWN", "Unknown (before this was tracked)"
+
     participant = models.ForeignKey(
         "participants.Participant",
         on_delete=models.PROTECT,
@@ -302,6 +315,24 @@ class Registration(UUIDModel):
     form_data = models.JSONField(
         default=dict,
         blank=True,
+    )
+
+    created_via = models.CharField(
+        max_length=20,
+        choices=CreatedVia.choices,
+        default=CreatedVia.UNKNOWN,
+    )
+
+    # Only set when created_via=ADMIN — a public self-registration has no
+    # logged-in admin account behind it. SET_NULL (not PROTECT/CASCADE)
+    # so deleting an admin user's account later doesn't take down every
+    # registration they ever created, or block deleting the account.
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
     )
 
     registered_at = models.DateTimeField(

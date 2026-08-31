@@ -13,6 +13,8 @@ def create_registration(
     participant_data,
     form_data,
     reserve=False,
+    created_via=Registration.CreatedVia.PUBLIC,
+    created_by=None,
 ):
 
     participant = Participant.objects.create(
@@ -63,6 +65,8 @@ def create_registration(
         amount=category.price,
         currency=category.currency,
         form_data=form_data,
+        created_via=created_via,
+        created_by=created_by,
     )
 
     if status == Registration.Status.CONFIRMED:

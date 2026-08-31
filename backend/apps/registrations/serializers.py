@@ -376,6 +376,8 @@ class AdminRegistrationSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
     event_name = serializers.CharField(source="event.name", read_only=True)
     payment_reference = serializers.SerializerMethodField()
+    created_via_display = serializers.CharField(source="get_created_via_display", read_only=True)
+    created_by = serializers.SerializerMethodField()
 
     class Meta:
         model = Registration
@@ -392,9 +394,25 @@ class AdminRegistrationSerializer(serializers.ModelSerializer):
             "event_name",
             "form_data",
             "payment_reference",
+            "created_via",
+            "created_via_display",
+            "created_by",
             "registered_at",
             "updated_at",
         )
+
+    def get_created_by(self, obj):
+        # Only ever set for created_via=ADMIN — a public self-registration
+        # has no logged-in admin account behind it. AdminRegistrationListView
+        # select_relates this, so accessing it here doesn't add a query per
+        # row; the single-object views (detail/create/edit) hit it live,
+        # which is fine there since they only ever serialize one row.
+        if not obj.created_by_id:
+            return None
+        return {
+            "full_name": obj.created_by.full_name,
+            "email": obj.created_by.email,
+        }
 
     def get_payment_reference(self, obj):
         # The gateway (Lipila)'s own transaction reference for this

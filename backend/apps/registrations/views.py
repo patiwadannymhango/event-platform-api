@@ -255,7 +255,7 @@ class AdminRegistrationListView(ListAPIView):
 
         qs = (
             Registration.objects
-            .select_related("participant", "category", "event")
+            .select_related("participant", "category", "event", "created_by")
             .prefetch_related(
                 # Feeds AdminRegistrationSerializer.get_payment_reference()
                 # without a query per row — ordered newest-first so its
@@ -335,7 +335,7 @@ class AdminRegistrationDetailView(RetrieveUpdateDestroyAPIView):
 
     permission_classes = [IsAuthenticated]
     serializer_class = AdminRegistrationSerializer
-    queryset = Registration.objects.select_related("participant", "category", "event")
+    queryset = Registration.objects.select_related("participant", "category", "event", "created_by")
 
     def get_object(self):
         # Not keyed by event_id in the URL (it's looked up by
@@ -432,7 +432,7 @@ class AdminRegistrationEditView(APIView):
 
     def patch(self, request, pk):
         registration = get_object_or_404(
-            Registration.objects.select_related("participant", "category", "event"),
+            Registration.objects.select_related("participant", "category", "event", "created_by"),
             pk=pk,
         )
         require_event_role(
@@ -505,6 +505,8 @@ class AdminRegistrationCreateView(APIView):
             participant_data=serializer.validated_data["participant"],
             form_data=serializer.validated_data.get("form_data", {}),
             reserve=False,
+            created_via=Registration.CreatedVia.ADMIN,
+            created_by=request.user,
         )
 
         desired_status = serializer.validated_data["status"]
@@ -583,14 +585,14 @@ class AdminRegistrationBulkUploadView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        report = self._process_rows(event, rows, commit=True)
+        report = self._process_rows(event, rows, commit=True, created_by=request.user)
 
         return Response(
             report,
             status=status.HTTP_201_CREATED if report["created_count"] else status.HTTP_400_BAD_REQUEST,
         )
 
-    def _process_rows(self, event, rows, commit):
+    def _process_rows(self, event, rows, commit, created_by=None):
         """
         Shared by the real upload (commit=True, actually creates
         registrations) and the preview endpoint (commit=False, only
@@ -675,6 +677,8 @@ class AdminRegistrationBulkUploadView(APIView):
                     },
                     form_data=form_data,
                     reserve=False,
+                    created_via=Registration.CreatedVia.ADMIN,
+                    created_by=created_by,
                 )
 
                 old_status = registration.status
