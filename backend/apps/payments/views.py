@@ -434,9 +434,17 @@ class AdminDashboardView(APIView):
             registered_at__date=timezone.localdate()
         ).count()
 
+        # "Revenue collected" must be real money that actually moved
+        # through the payment gateway. Summing CONFIRMED registrations'
+        # amounts overcounts: a registration can be marked CONFIRMED by
+        # an admin (manual "Add person", bulk upload) with no successful
+        # Payment behind it at all — that's not revenue. Sum actual
+        # SUCCESS payments for this event instead.
         revenue_confirmed = (
-            registrations.filter(status=Registration.Status.CONFIRMED)
-            .aggregate(total=Sum("amount"))["total"]
+            PaymentModel.objects.filter(
+                registration__event_id=event_id,
+                status=PaymentModel.Status.SUCCESS,
+            ).aggregate(total=Sum("amount"))["total"]
             or Decimal("0.00")
         )
 
