@@ -249,9 +249,23 @@ class AdminRegistrationListView(ListAPIView):
     ordering_fields = ["registered_at", "amount", "status"]
 
     def get_queryset(self):
+        from django.db.models import Prefetch
+
+        from apps.payments.models import Payment
+
         qs = (
             Registration.objects
             .select_related("participant", "category", "event")
+            .prefetch_related(
+                # Feeds AdminRegistrationSerializer.get_payment_reference()
+                # without a query per row — ordered newest-first so its
+                # [0] is the most recent attempt.
+                Prefetch(
+                    "payments",
+                    queryset=Payment.objects.order_by("-created_at"),
+                    to_attr="_all_payments",
+                )
+            )
             .filter(event_id=self.kwargs["event_id"])
         )
 

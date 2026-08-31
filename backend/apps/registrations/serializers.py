@@ -375,6 +375,7 @@ class AdminRegistrationSerializer(serializers.ModelSerializer):
     participant = AdminParticipantSerializer(read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     event_name = serializers.CharField(source="event.name", read_only=True)
+    payment_reference = serializers.SerializerMethodField()
 
     class Meta:
         model = Registration
@@ -390,9 +391,29 @@ class AdminRegistrationSerializer(serializers.ModelSerializer):
             "event",
             "event_name",
             "form_data",
+            "payment_reference",
             "registered_at",
             "updated_at",
         )
+
+    def get_payment_reference(self, obj):
+        # The gateway (Lipila)'s own transaction reference for this
+        # registration's payment — prefers a successful one (the real
+        # transaction that actually confirmed it); falls back to the most
+        # recent attempt so a pending/failed registration still shows
+        # something useful for looking it up in Lipila's dashboard.
+        # AdminRegistrationListView prefetches this as `_all_payments` to
+        # avoid a query per row; other views (detail/create/edit, which
+        # only ever serialize one registration) fall back to a live query.
+        payments = getattr(obj, "_all_payments", None)
+        if payments is None:
+            payments = list(obj.payments.order_by("-created_at"))
+
+        payment = next((p for p in payments if p.status == "SUCCESS"), None)
+        if payment is None and payments:
+            payment = payments[0]
+
+        return payment.provider_reference if payment else ""
 
 
 class AdminRegistrationStatusUpdateSerializer(serializers.Serializer):
