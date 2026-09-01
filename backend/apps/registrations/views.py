@@ -510,9 +510,20 @@ class AdminRegistrationCreateView(APIView):
         )
 
         desired_status = serializer.validated_data["status"]
+        old_status = registration.status
         if desired_status != registration.status:
             registration.status = desired_status
             registration.save(update_fields=["status", "updated_at"])
+
+        # Same gap as bulk upload had (fixed in 933e72e): create_registration()
+        # already notified for whatever status it computed on its own, but
+        # marking it CONFIRMED right here afterwards — the whole point of
+        # this "cash taken in person" flow — needs its own notification,
+        # or the runner never hears they're actually confirmed.
+        if desired_status == Registration.Status.CONFIRMED and old_status != desired_status:
+            from apps.notifications.services import notify_payment_confirmed
+
+            notify_payment_confirmed(registration)
 
         return Response(
             AdminRegistrationSerializer(registration).data,
