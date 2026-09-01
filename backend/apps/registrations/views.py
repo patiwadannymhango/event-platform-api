@@ -585,14 +585,29 @@ class AdminRegistrationBulkUploadView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        report = self._process_rows(event, rows, commit=True, created_by=request.user)
+        # Importing registrations that already exist somewhere else (a
+        # team's own signup sheet, historical data) shouldn't text every
+        # runner "we've received your registration" — they already know.
+        # Defaults to True so the normal dashboard upload flow (which
+        # never sends this field) keeps notifying exactly as before.
+        notify = self._parse_bool(request.data.get("notify"), default=True)
+
+        report = self._process_rows(event, rows, commit=True, created_by=request.user, notify=notify)
 
         return Response(
             report,
             status=status.HTTP_201_CREATED if report["created_count"] else status.HTTP_400_BAD_REQUEST,
         )
 
-    def _process_rows(self, event, rows, commit, created_by=None):
+    @staticmethod
+    def _parse_bool(value, default):
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() not in ("false", "0", "no", "")
+
+    def _process_rows(self, event, rows, commit, created_by=None, notify=True):
         """
         Shared by the real upload (commit=True, actually creates
         registrations) and the preview endpoint (commit=False, only
@@ -679,6 +694,7 @@ class AdminRegistrationBulkUploadView(APIView):
                     reserve=False,
                     created_via=Registration.CreatedVia.ADMIN,
                     created_by=created_by,
+                    notify=notify,
                 )
 
                 old_status = registration.status
@@ -695,8 +711,9 @@ class AdminRegistrationBulkUploadView(APIView):
                 # doesn't know to notify anyone. Send the same "you're
                 # confirmed" email+SMS the public site sends on a real
                 # payment, exactly like AdminRegistrationDetailView.patch()
-                # already does for the same kind of manual confirmation.
-                if desired_status == Registration.Status.CONFIRMED and old_status != desired_status:
+                # already does for the same kind of manual confirmation —
+                # unless this upload asked not to notify anyone at all.
+                if notify and desired_status == Registration.Status.CONFIRMED and old_status != desired_status:
                     from apps.notifications.services import notify_payment_confirmed
 
                     notify_payment_confirmed(registration)

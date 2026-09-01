@@ -15,6 +15,7 @@ def create_registration(
     reserve=False,
     created_via=Registration.CreatedVia.PUBLIC,
     created_by=None,
+    notify=True,
 ):
 
     participant = Participant.objects.create(
@@ -69,21 +70,29 @@ def create_registration(
         created_by=created_by,
     )
 
-    if status == Registration.Status.CONFIRMED:
-        from apps.notifications.services import (
-            notify_payment_confirmed,
-        )
+    # notify=False is for bulk-importing registrations that already exist
+    # somewhere else (a team's own signup sheet, historical data) — the
+    # runner already knows they're registered, so the normal "we've
+    # received your registration" / "you're confirmed" texts would be
+    # noise rather than useful. Off by default only where a caller
+    # explicitly asks; every existing call site keeps notifying exactly
+    # as before.
+    if notify:
+        if status == Registration.Status.CONFIRMED:
+            from apps.notifications.services import (
+                notify_payment_confirmed,
+            )
 
-        notify_payment_confirmed(registration)
-    else:
-        from apps.notifications.services import (
-            notify_registration_received,
-        )
+            notify_payment_confirmed(registration)
+        else:
+            from apps.notifications.services import (
+                notify_registration_received,
+            )
 
-        notify_registration_received(
-            registration,
-            reserved=reserve,
-        )
+            notify_registration_received(
+                registration,
+                reserved=reserve,
+            )
 
     return registration
 
