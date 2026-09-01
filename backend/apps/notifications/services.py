@@ -4,13 +4,18 @@ functions the rest of the codebase (registration/payment services,
 webhooks, admin actions) should call — they know how to compose the
 message and fire both email + SMS where appropriate.
 
-Only one email goes to a runner for the whole registration lifecycle: the
-"registration confirmed" email in notify_payment_confirmed(), sent once
-the registration actually succeeds (payment settles, or an admin marks it
-CONFIRMED). The other notify_* functions below intentionally do not send
-email — no "registration received" email while payment is still pending,
-and no failure/refund emails — by design, so a runner never receives more
-than one email out of this flow.
+Normally only one email goes to a runner for the whole registration
+lifecycle: the "registration confirmed" email in notify_payment_confirmed(),
+sent once the registration actually succeeds (payment settles, or an admin
+marks it CONFIRMED). The other automatic notify_* functions below
+intentionally do not send email — no "registration received" email while
+payment is still pending, and no failure/refund emails — by design, so a
+runner never receives more than one email out of that automatic flow.
+
+notify_registration_received_email() is the one deliberate exception —
+never called automatically, only from an admin action for registrations
+that are being paid for by someone else (a sponsor/company), where there's
+no payment step for the runner to eventually get an email about.
 """
 
 from django.conf import settings
@@ -61,6 +66,68 @@ def notify_registration_received(registration, *, reserved=False):
             registration=registration,
             notification_type=notification_type,
         )
+
+
+def notify_registration_received_email(registration):
+    """
+    Email-only "you're registered" notification, with no payment language
+    at all — for registrations someone else is paying for (a sponsor/
+    company covering a team's entry fees), where the runner has no
+    payment step of their own to eventually get an email about. Not
+    wired into any automatic flow; call this explicitly from an admin
+    action when that's actually the situation.
+    """
+    email, _ = _participant_contact(registration)
+    if not email:
+        return
+
+    participant = registration.participant
+    event = registration.event
+
+    subject = f"You're registered — {registration.registration_number}"
+    text = (
+        f"Hi {participant.first_name},\n\n"
+        f"Thanks for registering for {event.name}. Your spot is reserved "
+        "— see you at the start line!\n\n"
+        f"Reference: {registration.registration_number}\n"
+        f"Race category: {registration.category.name}\n"
+        + (f"Event date: {event.start_date:%d %B %Y}\n" if event.start_date else "")
+        + (f"Venue: {event.location}\n" if event.location else "")
+    )
+
+    logo_url = (
+        f"{settings.PUBLIC_BASE_URL}/static/notifications/email/logo.png"
+        if settings.PUBLIC_BASE_URL
+        else ""
+    )
+    track_url = (
+        f"{settings.PUBLIC_SITE_URL}/#track" if settings.PUBLIC_SITE_URL else "#"
+    )
+
+    html = render_to_string(
+        "notifications/emails/registration_pending.html",
+        {
+            "first_name": participant.first_name,
+            "event_name": event.name,
+            "reference": registration.registration_number,
+            "category_name": registration.category.name,
+            "event_date": f"{event.start_date:%d %B %Y}" if event.start_date else "",
+            "event_location": event.location,
+            "logo_url": logo_url,
+            "track_url": track_url,
+            "contact_email": settings.DEFAULT_FROM_EMAIL,
+            "contact_phone": settings.EVENT_CONTACT_PHONE,
+        },
+    )
+
+    send_email(
+        to=email,
+        subject=subject,
+        text_body=text,
+        html_body=html,
+        registration=registration,
+        notification_type=Notification.NotificationType.REGISTRATION_RECEIVED,
+    )
 
 
 def notify_payment_confirmed(registration):
