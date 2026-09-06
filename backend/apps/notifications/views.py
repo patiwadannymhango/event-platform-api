@@ -29,7 +29,7 @@ class AdminEventNotificationListView(ListAPIView):
     serializer_class = AdminNotificationSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["channel", "notification_type", "status"]
-    search_fields = ["recipient", "subject"]
+    search_fields = ["recipient", "subject", "registration__registration_number"]
 
     def get_queryset(self):
         return (
