@@ -330,14 +330,36 @@ class AdminRegistrationSummaryView(APIView):
 
     Read-only progress snapshot — total registrations, a per-category
     breakdown of status counts (plus capacity, where the category has
-    one set), and an overall t-shirt size breakdown. Pure aggregate
-    counts computed fresh on every call; never reads or touches
-    individual registration rows beyond what's needed to group/count
-    them, so there's nothing here that could accidentally change a
-    record.
+    one set), and overall t-shirt size and gender breakdowns. Pure
+    aggregate counts computed fresh on every call; never reads or
+    touches individual registration rows beyond what's needed to
+    group/count them, so there's nothing here that could accidentally
+    change a record.
     """
 
     permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
+
+    @staticmethod
+    def _form_data_breakdown(registrations, key, label):
+        # form_data is per-event JSON, so a blank/missing value is normal
+        # (e.g. a vendor-style event with no such field) — grouped under
+        # "" rather than dropped, so the total still reconciles. A
+        # missing key (SQL NULL) and a present-but-empty value ("") are
+        # distinct groups at the DB level even though both display the
+        # same way, so they're merged here after fetching rather than
+        # left as two separate zero-label rows.
+        from django.db.models import Count
+
+        counts = (
+            registrations.values(f"form_data__{key}")
+            .annotate(count=Count("id"))
+            .order_by()
+        )
+        totals: dict[str, int] = {}
+        for row in counts:
+            value = row[f"form_data__{key}"] or ""
+            totals[value] = totals.get(value, 0) + row["count"]
+        return [{label: value, "count": count} for value, count in totals.items()]
 
     def get(self, request, event_id):
         from django.db.models import Count
@@ -374,29 +396,15 @@ class AdminRegistrationSummaryView(APIView):
             bucket["by_status"].append({"status": row["status"], "count": row["count"]})
             bucket["total"] += row["count"]
 
-        # form_data is per-event JSON, so a blank/missing tshirt_size is
-        # normal (e.g. a vendor-style event with no such field) — grouped
-        # under "" rather than dropped, so the total still reconciles.
-        # A missing key (SQL NULL) and a present-but-empty value ("") are
-        # distinct groups at the DB level even though both display the
-        # same way, so they're merged here after fetching rather than
-        # left as two separate zero-label rows.
-        tshirt_counts = (
-            registrations.values("form_data__tshirt_size")
-            .annotate(count=Count("id"))
-            .order_by()
-        )
-        tshirt_totals: dict[str, int] = {}
-        for row in tshirt_counts:
-            size = row["form_data__tshirt_size"] or ""
-            tshirt_totals[size] = tshirt_totals.get(size, 0) + row["count"]
-        by_tshirt_size = [{"size": size, "count": count} for size, count in tshirt_totals.items()]
+        by_tshirt_size = self._form_data_breakdown(registrations, "tshirt_size", "size")
+        by_gender = self._form_data_breakdown(registrations, "gender", "gender")
 
         return Response(
             {
                 "total_registrations": registrations.count(),
                 "by_category": list(by_category.values()),
                 "by_tshirt_size": by_tshirt_size,
+                "by_gender": by_gender,
             }
         )
 
