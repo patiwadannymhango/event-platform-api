@@ -324,6 +324,78 @@ class AdminRegistrationFilterOptionsView(APIView):
         )
 
 
+class AdminRegistrationSummaryView(APIView):
+    """
+    GET /api/v1/registrations/admin/events/<event_id>/registrations/summary/
+
+    Read-only progress snapshot — total registrations, a per-category
+    breakdown of status counts (plus capacity, where the category has
+    one set), and an overall t-shirt size breakdown. Pure aggregate
+    counts computed fresh on every call; never reads or touches
+    individual registration rows beyond what's needed to group/count
+    them, so there's nothing here that could accidentally change a
+    record.
+    """
+
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
+
+    def get(self, request, event_id):
+        from django.db.models import Count
+
+        registrations = Registration.objects.filter(event_id=event_id)
+
+        # Every category for the event, even ones with zero registrations
+        # so far — those still belong in an "at a glance" progress view.
+        categories = list(
+            RegistrationCategory.objects
+            .filter(event_id=event_id)
+            .values("id", "name", "code", "capacity")
+            .order_by("-price", "name")
+        )
+        by_category = {
+            str(c["id"]): {
+                "category_id": str(c["id"]),
+                "category_name": c["name"],
+                "category_code": c["code"],
+                "capacity": c["capacity"],
+                "total": 0,
+                "by_status": [],
+            }
+            for c in categories
+        }
+
+        category_status_counts = (
+            registrations.values("category_id", "status").annotate(count=Count("id"))
+        )
+        for row in category_status_counts:
+            bucket = by_category.get(str(row["category_id"]))
+            if not bucket:
+                continue
+            bucket["by_status"].append({"status": row["status"], "count": row["count"]})
+            bucket["total"] += row["count"]
+
+        # form_data is per-event JSON, so a blank/missing tshirt_size is
+        # normal (e.g. a vendor-style event with no such field) — grouped
+        # under "" rather than dropped, so the total still reconciles.
+        tshirt_counts = (
+            registrations.values("form_data__tshirt_size")
+            .annotate(count=Count("id"))
+            .order_by()
+        )
+        by_tshirt_size = [
+            {"size": row["form_data__tshirt_size"] or "", "count": row["count"]}
+            for row in tshirt_counts
+        ]
+
+        return Response(
+            {
+                "total_registrations": registrations.count(),
+                "by_category": list(by_category.values()),
+                "by_tshirt_size": by_tshirt_size,
+            }
+        )
+
+
 class AdminRegistrationDetailView(RetrieveUpdateDestroyAPIView):
     """
     GET/PATCH/DELETE /api/v1/registrations/admin/registrations/<id>/

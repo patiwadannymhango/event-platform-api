@@ -10,6 +10,7 @@ from .views import (
     AdminRegistrationExportView,
     AdminRegistrationFilterOptionsView,
     AdminRegistrationListView,
+    AdminRegistrationSummaryView,
     PublicRegistrationCreateView,
     PublicRegistrationFormView,
     PublicRegistrationLookupView,
@@ -71,6 +72,11 @@ urlpatterns = [
         "admin/events/<uuid:event_id>/registrations/filters/",
         AdminRegistrationFilterOptionsView.as_view(),
         name="admin-registration-filter-options",
+    ),
+    path(
+        "admin/events/<uuid:event_id>/registrations/summary/",
+        AdminRegistrationSummaryView.as_view(),
+        name="admin-registration-summary",
     ),
     path(
         "admin/registrations/<uuid:pk>/",
