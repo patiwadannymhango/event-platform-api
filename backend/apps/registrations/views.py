@@ -377,15 +377,20 @@ class AdminRegistrationSummaryView(APIView):
         # form_data is per-event JSON, so a blank/missing tshirt_size is
         # normal (e.g. a vendor-style event with no such field) — grouped
         # under "" rather than dropped, so the total still reconciles.
+        # A missing key (SQL NULL) and a present-but-empty value ("") are
+        # distinct groups at the DB level even though both display the
+        # same way, so they're merged here after fetching rather than
+        # left as two separate zero-label rows.
         tshirt_counts = (
             registrations.values("form_data__tshirt_size")
             .annotate(count=Count("id"))
             .order_by()
         )
-        by_tshirt_size = [
-            {"size": row["form_data__tshirt_size"] or "", "count": row["count"]}
-            for row in tshirt_counts
-        ]
+        tshirt_totals: dict[str, int] = {}
+        for row in tshirt_counts:
+            size = row["form_data__tshirt_size"] or ""
+            tshirt_totals[size] = tshirt_totals.get(size, 0) + row["count"]
+        by_tshirt_size = [{"size": size, "count": count} for size, count in tshirt_totals.items()]
 
         return Response(
             {
