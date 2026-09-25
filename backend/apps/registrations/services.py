@@ -16,6 +16,7 @@ def create_registration(
     created_via=Registration.CreatedVia.PUBLIC,
     created_by=None,
     notify=True,
+    registration_number=None,
 ):
 
     participant = Participant.objects.create(
@@ -57,10 +58,13 @@ def create_registration(
         participant=participant,
         event=event,
         category=category,
+        # An explicit registration_number (only ever passed for a
+        # migrated-record import that already has its own reference from
+        # the system it came from) is preserved as-is instead of
+        # generating a new one.
         registration_number=(
-            generate_registration_number(
-                event
-            )
+            registration_number
+            or generate_registration_number(event)
         ),
         status=status,
         amount=category.price,

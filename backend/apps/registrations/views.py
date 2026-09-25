@@ -238,7 +238,7 @@ class AdminRegistrationListView(ListAPIView):
     permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
     serializer_class = AdminRegistrationSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["status", "category"]
+    filterset_fields = ["status", "category", "created_via"]
     search_fields = [
         "registration_number",
         "participant__first_name",
@@ -635,6 +635,21 @@ class AdminRegistrationBulkUploadView(APIView):
     emergency_contact_name, emergency_contact_phone, medical_notes — all
     stored in form_data exactly like a manual registration would.
 
+    Three more optional columns exist only for importing records that
+    already exist in some other system (a legacy platform's export):
+    registration_number (preserved as-is instead of generating a new
+    one — must not already be taken), registered_at (an ISO date/time,
+    otherwise it's "now" like a normal creation), and amount (otherwise
+    the category's current price, which may not match what was actually
+    paid historically). A normal bulk upload never sends these — its
+    template doesn't have the columns — so this is fully backward
+    compatible.
+
+    Also accepts an optional top-level "created_via" (defaults to
+    ADMIN, every existing call site's behavior unchanged) so a batch of
+    imported records reads as what it is rather than an ordinary manual
+    entry — see Registration.CreatedVia.
+
     Returns a report of created rows and any rows that failed, rather
     than failing the whole batch on one bad row.
     """
@@ -688,7 +703,20 @@ class AdminRegistrationBulkUploadView(APIView):
         # never sends this field) keeps notifying exactly as before.
         notify = self._parse_bool(request.data.get("notify"), default=True)
 
-        report = self._process_rows(event, rows, commit=True, created_by=request.user, notify=notify)
+        # Defaults to ADMIN (every existing call site's behavior,
+        # unchanged) — only a migration import passes something else, so
+        # its rows land in a dedicated section instead of reading as an
+        # ordinary manual entry.
+        created_via = request.data.get("created_via") or Registration.CreatedVia.ADMIN
+        if created_via not in Registration.CreatedVia.values:
+            return Response(
+                {"detail": f"Unknown created_via '{created_via}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        report = self._process_rows(
+            event, rows, commit=True, created_by=request.user, notify=notify, created_via=created_via
+        )
 
         return Response(
             report,
@@ -703,12 +731,14 @@ class AdminRegistrationBulkUploadView(APIView):
             return value
         return str(value).strip().lower() not in ("false", "0", "no", "")
 
-    def _process_rows(self, event, rows, commit, created_by=None, notify=True):
+    def _process_rows(self, event, rows, commit, created_by=None, notify=True, created_via=None):
         """
         Shared by the real upload (commit=True, actually creates
         registrations) and the preview endpoint (commit=False, only
         reports what *would* happen) so the two can never disagree.
         """
+        created_via = created_via or Registration.CreatedVia.ADMIN
+
         categories = {
             c.code: c
             for c in RegistrationCategory.objects.filter(event=event)
@@ -718,6 +748,7 @@ class AdminRegistrationBulkUploadView(APIView):
         errors = []
         results = []
         seen_emails = {}
+        seen_reg_numbers = {}
 
         for index, raw_row in enumerate(rows, start=2):  # header is row 1
             row = {
@@ -759,6 +790,38 @@ class AdminRegistrationBulkUploadView(APIView):
                         f"'{value}' isn't one of the usual {field} values ({', '.join(sorted(known))}) — check spelling/casing"
                     )
 
+            # Only ever set on a migration import (a normal bulk upload's
+            # rows have no such column) — an explicit reference from the
+            # system the record came from, which must stay unique just
+            # like a generated one would.
+            registration_number = row.get("registration_number", "")
+            if registration_number:
+                if registration_number in seen_reg_numbers:
+                    row_errors.append(
+                        f"Duplicate registration_number '{registration_number}' — also row {seen_reg_numbers[registration_number]}"
+                    )
+                elif Registration.objects.filter(registration_number=registration_number).exists():
+                    row_errors.append(f"registration_number '{registration_number}' is already in use")
+                else:
+                    seen_reg_numbers[registration_number] = index
+
+            registered_at = None
+            raw_registered_at = row.get("registered_at", "")
+            if raw_registered_at:
+                from django.utils.dateparse import parse_datetime
+
+                registered_at = parse_datetime(raw_registered_at)
+                if registered_at is None:
+                    row_errors.append(f"'{raw_registered_at}' isn't a valid registered_at date/time")
+
+            amount_override = None
+            raw_amount = row.get("amount", "")
+            if raw_amount:
+                try:
+                    amount_override = float(raw_amount)
+                except ValueError:
+                    row_errors.append(f"'{raw_amount}' isn't a valid amount")
+
             if row_errors:
                 errors.append({"row": index, "error": "; ".join(row_errors)})
                 results.append(
@@ -788,15 +851,31 @@ class AdminRegistrationBulkUploadView(APIView):
                     },
                     form_data=form_data,
                     reserve=False,
-                    created_via=Registration.CreatedVia.ADMIN,
+                    created_via=created_via,
                     created_by=created_by,
                     notify=notify,
+                    registration_number=registration_number or None,
                 )
 
                 old_status = registration.status
                 if desired_status != registration.status:
                     registration.status = desired_status
                     registration.save(update_fields=["status", "updated_at"])
+
+                # registered_at is auto_now_add (set on every normal
+                # INSERT regardless of what's passed to .create()) and
+                # amount always comes from the category's current price —
+                # both need a follow-up .update() to land a migrated
+                # row's real historical values instead.
+                update_fields = {}
+                if registered_at is not None:
+                    update_fields["registered_at"] = registered_at
+                if amount_override is not None:
+                    update_fields["amount"] = amount_override
+                if update_fields:
+                    Registration.objects.filter(pk=registration.pk).update(**update_fields)
+                    for field, value in update_fields.items():
+                        setattr(registration, field, value)
 
                 # create_registration() already sent the right notification
                 # for whatever status it computed on its own (a "pending
@@ -1027,6 +1106,13 @@ class AdminRegistrationExportView(APIView):
             .filter(event=event)
             .order_by("-registered_at")
         )
+
+        # Optional — lets a filtered view (e.g. the admin's "Lenco
+        # Records" section) export just its own rows instead of always
+        # every registration for the event.
+        created_via = request.query_params.get("created_via")
+        if created_via:
+            registrations = registrations.filter(created_via=created_via)
 
         workbook = openpyxl.Workbook()
         sheet = workbook.active

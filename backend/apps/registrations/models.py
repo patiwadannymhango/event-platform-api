@@ -272,6 +272,17 @@ class Registration(UUIDModel):
         # rather than being guessed at and mislabeled.
         UNKNOWN = "UNKNOWN", "Unknown (before this was tracked)"
 
+        # Bulk-imported from the Lenco-era system (the previous payment
+        # gateway/registration flow, before Lipila). These already had
+        # their own reference numbers and confirmed status from that
+        # system — the bulk-upload row for one of these can carry an
+        # explicit registration_number so it's preserved rather than
+        # re-generated. Still ordinary Registration rows (counted in
+        # dashboard/summary totals like anything else); the admin's
+        # "Lenco Records" section is just this list view filtered down
+        # to created_via=LENCO_MIGRATION, same rows as everywhere else.
+        LENCO_MIGRATION = "LENCO_MIGRATION", "Migrated from Lenco"
+
     participant = models.ForeignKey(
         "participants.Participant",
         on_delete=models.PROTECT,
