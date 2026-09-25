@@ -424,7 +424,17 @@ class AdminDashboardView(APIView):
         from django.utils import timezone
         from apps.registrations.models import Registration
 
-        registrations = Registration.objects.filter(event_id=event_id)
+        # A migrated legacy batch (Registration.CreatedVia.LENCO_MIGRATION)
+        # is real data — it still counts on the Summary page — but this
+        # dashboard backs the day-to-day Registrations view, which
+        # shouldn't have its totals inflated by a one-time historical
+        # import. revenue_confirmed below is unaffected either way (it's
+        # computed from actual Payment rows, and a migrated record has
+        # none), but total_registrations/by_status/today_count/
+        # revenue_pending all read from this queryset.
+        registrations = Registration.objects.filter(event_id=event_id).exclude(
+            created_via=Registration.CreatedVia.LENCO_MIGRATION
+        )
 
         by_status = list(
             registrations.values("status").annotate(count=Count("id"))

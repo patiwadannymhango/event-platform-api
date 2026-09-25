@@ -269,6 +269,17 @@ class AdminRegistrationListView(ListAPIView):
             .filter(event_id=self.kwargs["event_id"])
         )
 
+        # Migrated legacy records (see Registration.CreatedVia.LENCO_MIGRATION)
+        # are ordinary registrations and still count everywhere that reads
+        # the database directly (Summary, revenue, capacity) — but this is
+        # the admin's day-to-day registrations list, and a one-time
+        # historical import shouldn't clutter it or inflate its counts.
+        # They get their own dedicated, explicitly-filtered view instead
+        # (the admin's "Lenco Records" section) — so only leave them out
+        # here when nothing already asked for a specific created_via.
+        if not self.request.query_params.get("created_via"):
+            qs = qs.exclude(created_via=Registration.CreatedVia.LENCO_MIGRATION)
+
         gender = self.request.query_params.get("gender")
         if gender:
             qs = qs.filter(form_data__gender=gender)
@@ -399,12 +410,31 @@ class AdminRegistrationSummaryView(APIView):
         by_tshirt_size = self._form_data_breakdown(registrations, "tshirt_size", "size")
         by_gender = self._form_data_breakdown(registrations, "gender", "gender")
 
+        # This is the one place a migrated legacy batch (see
+        # Registration.CreatedVia.LENCO_MIGRATION) is still folded into
+        # the overall totals above — the Registrations list/dashboard
+        # deliberately excludes it. So this view is also where an admin
+        # needs to be able to tell how much of a total came from there;
+        # source_display uses the same human label as everywhere else
+        # (created_via_display on a registration) rather than the raw
+        # enum value.
+        created_via_labels = dict(Registration.CreatedVia.choices)
+        by_source = [
+            {
+                "source": row["created_via"],
+                "source_display": created_via_labels.get(row["created_via"], row["created_via"]),
+                "count": row["count"],
+            }
+            for row in registrations.values("created_via").annotate(count=Count("id"))
+        ]
+
         return Response(
             {
                 "total_registrations": registrations.count(),
                 "by_category": list(by_category.values()),
                 "by_tshirt_size": by_tshirt_size,
                 "by_gender": by_gender,
+                "by_source": by_source,
             }
         )
 
@@ -1109,10 +1139,14 @@ class AdminRegistrationExportView(APIView):
 
         # Optional — lets a filtered view (e.g. the admin's "Lenco
         # Records" section) export just its own rows instead of always
-        # every registration for the event.
+        # every registration for the event. Same default exclusion as
+        # the list view when nothing explicitly asked for a source: a
+        # migrated legacy batch shouldn't pad an ordinary export.
         created_via = request.query_params.get("created_via")
         if created_via:
             registrations = registrations.filter(created_via=created_via)
+        else:
+            registrations = registrations.exclude(created_via=Registration.CreatedVia.LENCO_MIGRATION)
 
         workbook = openpyxl.Workbook()
         sheet = workbook.active
