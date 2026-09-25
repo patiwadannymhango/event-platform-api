@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AdminRegistrationBulkResendConfirmationView,
     AdminRegistrationBulkUploadPreviewView,
     AdminRegistrationBulkUploadTemplateView,
     AdminRegistrationBulkUploadView,
@@ -9,6 +10,7 @@ from .views import (
     AdminRegistrationEditView,
     AdminRegistrationExportView,
     AdminRegistrationFilterOptionsView,
+    AdminRegistrationIdsView,
     AdminRegistrationListView,
     AdminRegistrationSummaryView,
     PublicRegistrationCreateView,
@@ -44,9 +46,19 @@ urlpatterns = [
         name="admin-registration-list",
     ),
     path(
+        "admin/events/<uuid:event_id>/registrations/ids/",
+        AdminRegistrationIdsView.as_view(),
+        name="admin-registration-ids",
+    ),
+    path(
         "admin/events/<uuid:event_id>/registrations/create/",
         AdminRegistrationCreateView.as_view(),
         name="admin-registration-create",
+    ),
+    path(
+        "admin/events/<uuid:event_id>/registrations/resend-confirmation/",
+        AdminRegistrationBulkResendConfirmationView.as_view(),
+        name="admin-registration-bulk-resend-confirmation",
     ),
     path(
         "admin/events/<uuid:event_id>/registrations/bulk-upload/",

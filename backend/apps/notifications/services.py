@@ -307,3 +307,34 @@ def resend_notification_email(notification, *, to):
         registration=registration,
         notification_type=notification.notification_type,
     )
+
+
+def resend_confirmation_email(registration, *, to=None):
+    """
+    Sends the "you're confirmed" email straight from a Registration,
+    rather than from an existing Notification row — the admin's bulk
+    "resend confirmation email" action (Registrations/Vendors/Lenco
+    Records) works this way because it needs to work even for a
+    registration that's never had one sent yet (e.g. a Lenco-migrated
+    record imported with notify=False). Email only, no SMS — deliberate,
+    matches this being specifically a "resend confirmation email"
+    action rather than a full re-run of the automatic notify flow.
+
+    Raises ValueError if there's no email address to send to (`to`, or
+    the participant's own email) — the caller decides how to report
+    that per registration rather than this silently doing nothing.
+    """
+    participant = registration.participant
+    recipient = to or participant.email
+    if not recipient:
+        raise ValueError("No email address on file for this registration.")
+
+    subject, text, html = _build_payment_confirmed_email(registration)
+    return send_email(
+        to=recipient,
+        subject=subject,
+        text_body=text,
+        html_body=html,
+        registration=registration,
+        notification_type=Notification.NotificationType.PAYMENT_CONFIRMED,
+    )

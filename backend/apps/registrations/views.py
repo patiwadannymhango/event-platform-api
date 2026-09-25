@@ -295,6 +295,27 @@ class AdminRegistrationListView(ListAPIView):
         return qs
 
 
+class AdminRegistrationIdsView(AdminRegistrationListView):
+    """
+    GET /api/v1/registrations/admin/events/<event_id>/registrations/ids/
+
+    Same filtering as AdminRegistrationListView above (status/category/
+    gender/organisation/attendance_type/created_via/search — inherited,
+    not reimplemented) but returns every matching id with no pagination.
+    Powers "select all N results" for a bulk action (e.g. resend
+    confirmation email) in the admin — the table itself only ever loads
+    one page at a time, so it has no way to know the other pages' ids
+    without this.
+    """
+
+    pagination_class = None
+
+    def list(self, request, *args, **kwargs):
+        ids = self.filter_queryset(self.get_queryset()).values_list("id", flat=True)
+        ids = [str(i) for i in ids]
+        return Response({"ids": ids, "count": len(ids)})
+
+
 class AdminRegistrationFilterOptionsView(APIView):
     """
     GET /api/v1/registrations/admin/events/<event_id>/registrations/filters/
@@ -614,6 +635,99 @@ class AdminRegistrationEditView(APIView):
             registration.save(update_fields=["form_data", "updated_at"])
 
         return Response(AdminRegistrationSerializer(registration).data)
+
+
+class AdminRegistrationBulkResendConfirmationView(APIView):
+    """
+    POST /api/v1/registrations/admin/events/<event_id>/registrations/resend-confirmation/
+    Body: {"registration_ids": ["...", ...]}
+
+    Resends the "you're confirmed" email for each listed registration —
+    this is the admin's multi-select "resend confirmation email" action
+    (Registrations, Vendors, and Lenco Records all hit this same
+    endpoint, just scoped to their own event/filter). Unlike the
+    notifications app's per-notification resend, this works from the
+    registration directly, so it's the only way to send one for a
+    registration that's never had a confirmation email at all — e.g. a
+    Lenco-migrated record, imported with notify=False specifically so
+    this could be done later, deliberately, in one batch.
+
+    Only registrations that are actually CONFIRMED and have an email
+    address get sent; anything else is reported back as "skipped"
+    rather than failing the whole batch. Capped at MAX_BATCH — there's
+    no task queue wired up for notifications, so this runs as a plain
+    synchronous loop inside the request (same as bulk upload), and at
+    roughly a few seconds per email a large "select all" would blow
+    past gunicorn's request timeout. The caller (the admin dashboard)
+    is expected to split a bigger selection into several calls.
+    """
+
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_REGISTRATION_MANAGE_ROLES)]
+
+    MAX_BATCH = 15
+
+    def post(self, request, event_id):
+        from apps.notifications.models import Notification
+        from apps.notifications.services import resend_confirmation_email
+
+        ids = request.data.get("registration_ids")
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"detail": "registration_ids must be a non-empty list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(ids) > self.MAX_BATCH:
+            return Response(
+                {"detail": f"Send at most {self.MAX_BATCH} registration_ids per request."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        registrations = {
+            str(r.id): r
+            for r in Registration.objects.select_related("participant", "event", "category").filter(
+                event_id=event_id, id__in=ids
+            )
+        }
+
+        results = []
+        sent_count = 0
+
+        for rid in ids:
+            registration = registrations.get(str(rid))
+
+            if not registration:
+                results.append({"id": rid, "status": "error", "detail": "Registration not found."})
+                continue
+
+            if registration.status != Registration.Status.CONFIRMED:
+                results.append(
+                    {
+                        "id": rid,
+                        "status": "skipped",
+                        "detail": f"Not confirmed (status: {registration.get_status_display()}).",
+                    }
+                )
+                continue
+
+            try:
+                notification = resend_confirmation_email(registration)
+            except ValueError as exc:
+                results.append({"id": rid, "status": "skipped", "detail": str(exc)})
+                continue
+
+            if notification.status == Notification.Status.SENT:
+                sent_count += 1
+                results.append({"id": rid, "status": "sent", "detail": notification.recipient})
+            else:
+                results.append(
+                    {
+                        "id": rid,
+                        "status": "error",
+                        "detail": notification.error_message or "Failed to send.",
+                    }
+                )
+
+        return Response({"sent_count": sent_count, "total": len(ids), "results": results})
 
 
 class AdminRegistrationCreateView(APIView):
