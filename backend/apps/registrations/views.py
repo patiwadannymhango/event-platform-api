@@ -359,18 +359,29 @@ class AdminRegistrationSummaryView(APIView):
         # distinct groups at the DB level even though both display the
         # same way, so they're merged here after fetching rather than
         # left as two separate zero-label rows.
+        #
+        # Also grouped by created_via so each value's count can show how
+        # much of it came from a Lenco migration import — the
+        # Registrations page excludes those, so this is the only place
+        # that split is visible.
         from django.db.models import Count
 
         counts = (
-            registrations.values(f"form_data__{key}")
+            registrations.values(f"form_data__{key}", "created_via")
             .annotate(count=Count("id"))
             .order_by()
         )
-        totals: dict[str, int] = {}
+        totals: dict[str, dict] = {}
         for row in counts:
             value = row[f"form_data__{key}"] or ""
-            totals[value] = totals.get(value, 0) + row["count"]
-        return [{label: value, "count": count} for value, count in totals.items()]
+            bucket = totals.setdefault(value, {"count": 0, "lenco_count": 0})
+            bucket["count"] += row["count"]
+            if row["created_via"] == Registration.CreatedVia.LENCO_MIGRATION:
+                bucket["lenco_count"] += row["count"]
+        return [
+            {label: value, "count": data["count"], "lenco_count": data["lenco_count"]}
+            for value, data in totals.items()
+        ]
 
     def get(self, request, event_id):
         from django.db.models import Count
@@ -392,6 +403,7 @@ class AdminRegistrationSummaryView(APIView):
                 "category_code": c["code"],
                 "capacity": c["capacity"],
                 "total": 0,
+                "lenco_count": 0,
                 "by_status": [],
             }
             for c in categories
@@ -406,6 +418,20 @@ class AdminRegistrationSummaryView(APIView):
                 continue
             bucket["by_status"].append({"status": row["status"], "count": row["count"]})
             bucket["total"] += row["count"]
+
+        # How much of each category's total above came from a Lenco
+        # migration import — a separate pass rather than folding
+        # created_via into the status query above, so the by_status
+        # breakdown (used for the Confirmed/Pending/Reserved/Exempted
+        # columns) doesn't have to be re-merged across sources.
+        category_lenco_counts = {
+            str(row["category_id"]): row["count"]
+            for row in registrations.filter(
+                created_via=Registration.CreatedVia.LENCO_MIGRATION
+            ).values("category_id").annotate(count=Count("id"))
+        }
+        for category_id, bucket in by_category.items():
+            bucket["lenco_count"] = category_lenco_counts.get(category_id, 0)
 
         by_tshirt_size = self._form_data_breakdown(registrations, "tshirt_size", "size")
         by_gender = self._form_data_breakdown(registrations, "gender", "gender")
