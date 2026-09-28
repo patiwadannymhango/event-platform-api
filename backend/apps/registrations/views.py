@@ -586,10 +586,16 @@ class AdminRegistrationEditView(APIView):
     permission_classes = [IsAuthenticated]
 
     PARTICIPANT_FIELDS = ["first_name", "last_name", "phone"]
+    # A mix of runner-form and vendor-form fields (both live in the same
+    # form_data JSON blob, just under different keys per event) — same
+    # approach as AdminRegistrationExportView.COLUMNS. Whichever fields a
+    # given request actually sends (based on which admin page it came
+    # from) are the only ones touched; the rest of form_data is left as-is.
     FORM_DATA_FIELDS = [
         "gender", "age_range", "country", "tshirt_size", "attendance_type",
         "club_or_institution", "emergency_contact_name", "emergency_contact_phone",
         "medical_notes",
+        "business_name", "business_location", "products_services", "requirement",
     ]
 
     def patch(self, request, pk):
