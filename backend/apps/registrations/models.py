@@ -216,7 +216,28 @@ class RegistrationCategory(UUIDModel):
 
     def __str__(self):
         return f"{self.event.name} - {self.name}"
-    
+
+    def is_sold_out(self):
+        """
+        Same "counts toward capacity" rule the public serializer's
+        validate() enforces at submission time — kept here so the
+        public categories list (what decides whether the option is
+        shown as disabled) can never drift out of sync with what
+        actually gets rejected.
+        """
+        if self.capacity is None:
+            return False
+
+        active_count = Registration.objects.filter(
+            category=self,
+            status__in=[
+                Registration.Status.PENDING_PAYMENT,
+                Registration.Status.PAYMENT_PROCESSING,
+                Registration.Status.CONFIRMED,
+            ],
+        ).count()
+
+        return active_count >= self.capacity
 
 
 class Registration(UUIDModel):

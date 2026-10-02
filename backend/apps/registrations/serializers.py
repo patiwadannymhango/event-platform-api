@@ -37,6 +37,8 @@ class RegistrationCategorySerializer(
     serializers.ModelSerializer
 ):
 
+    sold_out = serializers.SerializerMethodField()
+
     class Meta:
         model = RegistrationCategory
 
@@ -50,7 +52,11 @@ class RegistrationCategorySerializer(
             "capacity",
             "registration_start",
             "registration_end",
+            "sold_out",
         )
+
+    def get_sold_out(self, obj):
+        return obj.is_sold_out()
 
 
 class RegistrationFormSerializer(
@@ -176,29 +182,16 @@ class PublicRegistrationSerializer(
                 }
             )
 
-        if category.capacity is not None:
+        if category.is_sold_out():
 
-            current_count = (
-                Registration.objects.filter(
-                    category=category,
-                    status__in=[
-                        Registration.Status.PENDING_PAYMENT,
-                        Registration.Status.PAYMENT_PROCESSING,
-                        Registration.Status.CONFIRMED,
-                    ],
-                ).count()
+            raise serializers.ValidationError(
+                {
+                    "category_id": (
+                        "This registration category "
+                        "has reached capacity."
+                    )
+                }
             )
-
-            if current_count >= category.capacity:
-
-                raise serializers.ValidationError(
-                    {
-                        "category_id": (
-                            "This registration category "
-                            "has reached capacity."
-                        )
-                    }
-                )
 
         attrs["category"] = category
 
