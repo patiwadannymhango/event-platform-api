@@ -475,6 +475,32 @@ class AdminRegistrationSummaryView(APIView):
             for row in registrations.values("created_via").annotate(count=Count("id"))
         ]
 
+        # The overall "Confirmed" stat is one number, but it's really three
+        # different kinds of confirmation folded together — a real Lipila
+        # payment, an admin manually marking something confirmed (cash
+        # taken in person, a bulk-uploaded corporate team, etc.), and a
+        # Lenco-era record that arrived already confirmed. Same grouping
+        # as by_source above, just restricted to CONFIRMED so the split
+        # is visible instead of only the lumped total.
+        confirmed_source_labels = {
+            Registration.CreatedVia.PUBLIC: "Lipila Paid",
+            Registration.CreatedVia.ADMIN: "Confirmed Uploaded",
+            Registration.CreatedVia.LENCO_MIGRATION: "Lenco Upload Confirmed",
+            Registration.CreatedVia.UNKNOWN: created_via_labels[Registration.CreatedVia.UNKNOWN],
+        }
+        confirmed_by_source = [
+            {
+                "source": row["created_via"],
+                "source_display": confirmed_source_labels.get(
+                    row["created_via"], created_via_labels.get(row["created_via"], row["created_via"])
+                ),
+                "count": row["count"],
+            }
+            for row in registrations.filter(status=Registration.Status.CONFIRMED)
+            .values("created_via")
+            .annotate(count=Count("id"))
+        ]
+
         return Response(
             {
                 "total_registrations": registrations.count(),
@@ -482,6 +508,7 @@ class AdminRegistrationSummaryView(APIView):
                 "by_tshirt_size": by_tshirt_size,
                 "by_gender": by_gender,
                 "by_source": by_source,
+                "confirmed_by_source": confirmed_by_source,
             }
         )
 
