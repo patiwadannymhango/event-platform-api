@@ -501,6 +501,17 @@ class AdminRegistrationSummaryView(APIView):
             .annotate(count=Count("id"))
         ]
 
+        # Full status breakdown for just the Lenco-migrated rows — powers
+        # the Lenco Records page's own Confirmed/Unconfirmed split, same
+        # bucketing (registrationStatusLabel on the frontend) as every
+        # other status breakdown in this payload.
+        lenco_by_status = [
+            {"status": row["status"], "count": row["count"]}
+            for row in registrations.filter(created_via=Registration.CreatedVia.LENCO_MIGRATION)
+            .values("status")
+            .annotate(count=Count("id"))
+        ]
+
         return Response(
             {
                 "total_registrations": registrations.count(),
@@ -509,6 +520,7 @@ class AdminRegistrationSummaryView(APIView):
                 "by_gender": by_gender,
                 "by_source": by_source,
                 "confirmed_by_source": confirmed_by_source,
+                "lenco_by_status": lenco_by_status,
             }
         )
 
