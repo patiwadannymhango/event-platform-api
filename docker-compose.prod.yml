@@ -40,6 +40,30 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
 
+  # Consumes the Celery queue (apps/notifications/tasks.py) — currently
+  # just the race pack email broadcast, but any future "this would be
+  # slow/blocking inside a request" admin action belongs here too.
+  # Same image as backend, just a different command; reuses backend's
+  # entrypoint (migrate/collectstatic/seed on boot) since those are all
+  # idempotent and it keeps this to one Dockerfile instead of two.
+  # Requires CELERY_TASK_ALWAYS_EAGER=false in backend/.env — otherwise
+  # tasks run inline in whichever process called .delay() instead of
+  # here, defeating the point of a separate worker.
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+    command: celery -A config worker --loglevel=info --concurrency=2
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   # This stack is backend-only now — neither frontend is built or served
   # here. Both the public registration site AND the admin dashboard
   # deploy separately on Vercel as standalone Vite apps (see the root

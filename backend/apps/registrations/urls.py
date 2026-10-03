@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AdminRacePackEmailStatusView,
     AdminRegistrationBulkResendConfirmationView,
     AdminRegistrationBulkUploadPreviewView,
     AdminRegistrationBulkUploadTemplateView,
@@ -13,6 +14,7 @@ from .views import (
     AdminRegistrationIdsView,
     AdminRegistrationListView,
     AdminRegistrationSummaryView,
+    AdminSendRacePackEmailView,
     PublicRegistrationCreateView,
     PublicRegistrationFormView,
     PublicRegistrationLookupView,
@@ -89,6 +91,16 @@ urlpatterns = [
         "admin/events/<uuid:event_id>/registrations/summary/",
         AdminRegistrationSummaryView.as_view(),
         name="admin-registration-summary",
+    ),
+    path(
+        "admin/events/<uuid:event_id>/registrations/send-race-pack-email/",
+        AdminSendRacePackEmailView.as_view(),
+        name="admin-registration-send-race-pack-email",
+    ),
+    path(
+        "admin/events/<uuid:event_id>/registrations/send-race-pack-email/status/",
+        AdminRacePackEmailStatusView.as_view(),
+        name="admin-registration-send-race-pack-email-status",
     ),
     path(
         "admin/registrations/<uuid:pk>/",

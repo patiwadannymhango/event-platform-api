@@ -40,6 +40,10 @@ class Notification(UUIDModel):
             "REFUND_PROCESSED",
             "Refund processed",
         )
+        RACE_PACK_COLLECTION = (
+            "RACE_PACK_COLLECTION",
+            "Race pack collection",
+        )
         CUSTOM = "CUSTOM", "Custom"
 
     registration = models.ForeignKey(

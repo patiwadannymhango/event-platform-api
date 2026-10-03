@@ -1389,3 +1389,101 @@ class AdminRegistrationExportView(APIView):
             f'attachment; filename="{event.slug}-registrations.xlsx"'
         )
         return response
+
+
+class AdminSendRacePackEmailView(APIView):
+    """
+    POST /api/v1/registrations/admin/events/<event_id>/registrations/send-race-pack-email/
+
+    Queues the "Race Pack Collection Details" email for every CONFIRMED
+    registration in the event that has an email on file and hasn't
+    already been sent one. Unlike AdminRegistrationBulkResendConfirmationView
+    (capped at 15 per call because it sends synchronously inside the
+    request), this is a one-off broadcast to potentially 1000+ people —
+    it hands each one to a Celery task (apps/notifications/tasks.py) and
+    returns immediately; the actual sending happens in the background
+    worker, rate-limited, so the request itself stays fast regardless of
+    how many people are being emailed.
+
+    Safe to call again later (e.g. for people who registered since the
+    last send, or confirmed after being pending) — anyone already sent
+    is skipped here and, as a second guard against a double-click
+    racing the still-draining queue, inside the task itself too.
+    """
+
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_REGISTRATION_MANAGE_ROLES)]
+
+    def post(self, request, event_id):
+        from apps.notifications.models import Notification
+        from apps.notifications.tasks import send_race_pack_email
+
+        event = Event.objects.get(id=event_id)
+
+        already_sent_ids = Notification.objects.filter(
+            registration__event=event,
+            notification_type=Notification.NotificationType.RACE_PACK_COLLECTION,
+            status=Notification.Status.SENT,
+        ).values_list("registration_id", flat=True)
+
+        confirmed = Registration.objects.filter(
+            event=event, status=Registration.Status.CONFIRMED,
+        ).exclude(id__in=already_sent_ids).select_related("participant")
+
+        queued_count = 0
+        skipped_no_email = 0
+        for registration in confirmed:
+            if not registration.participant.email:
+                skipped_no_email += 1
+                continue
+            send_race_pack_email.delay(str(registration.id))
+            queued_count += 1
+
+        return Response(
+            {
+                "queued_count": queued_count,
+                "already_sent_count": already_sent_ids.count(),
+                "skipped_no_email_count": skipped_no_email,
+            }
+        )
+
+
+class AdminRacePackEmailStatusView(APIView):
+    """
+    GET /api/v1/registrations/admin/events/<event_id>/registrations/send-race-pack-email/status/
+
+    Read-only progress readout for the broadcast above — how many of
+    the event's confirmed registrations have had the race pack email
+    sent, are still queued/pending, or failed, so the admin dashboard
+    can show live progress without needing to poll Celery directly.
+    """
+
+    permission_classes = [IsAuthenticated, HasEventRole(*EVENT_VIEW_ROLES)]
+
+    def get(self, request, event_id):
+        from apps.notifications.models import Notification
+
+        event = Event.objects.get(id=event_id)
+
+        confirmed_count = Registration.objects.filter(
+            event=event, status=Registration.Status.CONFIRMED,
+        ).count()
+
+        notifications = Notification.objects.filter(
+            registration__event=event,
+            notification_type=Notification.NotificationType.RACE_PACK_COLLECTION,
+        )
+        sent_count = notifications.filter(status=Notification.Status.SENT).count()
+        failed_count = notifications.filter(status=Notification.Status.FAILED).count()
+        pending_count = notifications.filter(status=Notification.Status.PENDING).count()
+
+        return Response(
+            {
+                "confirmed_count": confirmed_count,
+                "sent_count": sent_count,
+                "failed_count": failed_count,
+                "pending_count": pending_count,
+                "not_yet_queued_count": max(
+                    0, confirmed_count - sent_count - failed_count - pending_count
+                ),
+            }
+        )
