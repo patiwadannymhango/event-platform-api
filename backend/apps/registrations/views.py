@@ -875,6 +875,21 @@ class AdminRegistrationBulkUploadView(APIView):
     ]
     parser_classes = [MultiPartParser, JSONParser]
 
+    # A registration/confirmation notification sends a real blocking SMTP
+    # email (~3-4s each — see AdminRegistrationBulkResendConfirmationView's
+    # own 15-per-request cap). Doing that inline for every row of a large
+    # bulk upload can run past gunicorn's worker timeout, which kills the
+    # whole request mid-row — and since rows already committed stay
+    # committed, retrying the same file then creates duplicates of
+    # whatever got through before the kill (this happened in production:
+    # a 19-row upload died twice, leaving 14 people double-created).
+    # Capping how many rows get notified inline keeps the request itself
+    # fast regardless of row count; any rows past the cap are still
+    # created normally, just without the automatic email — the admin can
+    # notify them afterward via the properly-batched resend-confirmation
+    # action.
+    MAX_SYNC_NOTIFICATIONS = 10
+
     REQUIRED_COLUMNS = ["first_name", "last_name", "category_code"]
     FORM_DATA_COLUMNS = [
         "gender",
@@ -964,6 +979,7 @@ class AdminRegistrationBulkUploadView(APIView):
         results = []
         seen_emails = {}
         seen_reg_numbers = {}
+        notifications_sent = 0
 
         for index, raw_row in enumerate(rows, start=2):  # header is row 1
             row = {
@@ -1054,6 +1070,13 @@ class AdminRegistrationBulkUploadView(APIView):
                 field: row[field] for field in self.FORM_DATA_COLUMNS if row.get(field)
             }
 
+            row_notify = notify and notifications_sent < self.MAX_SYNC_NOTIFICATIONS
+            if notify and not row_notify:
+                row_warnings.append(
+                    "Created but not auto-notified — this request's notification "
+                    "limit was reached; use the bulk 'resend confirmation' action."
+                )
+
             try:
                 registration = create_registration(
                     event=event,
@@ -1068,9 +1091,11 @@ class AdminRegistrationBulkUploadView(APIView):
                     reserve=False,
                     created_via=created_via,
                     created_by=created_by,
-                    notify=notify,
+                    notify=row_notify,
                     registration_number=registration_number or None,
                 )
+                if row_notify:
+                    notifications_sent += 1
 
                 old_status = registration.status
                 if desired_status != registration.status:
@@ -1103,10 +1128,15 @@ class AdminRegistrationBulkUploadView(APIView):
                 # payment, exactly like AdminRegistrationDetailView.patch()
                 # already does for the same kind of manual confirmation —
                 # unless this upload asked not to notify anyone at all.
-                if notify and desired_status == Registration.Status.CONFIRMED and old_status != desired_status:
+                if (
+                    row_notify
+                    and desired_status == Registration.Status.CONFIRMED
+                    and old_status != desired_status
+                ):
                     from apps.notifications.services import notify_payment_confirmed
 
                     notify_payment_confirmed(registration)
+                    notifications_sent += 1
 
                 created.append(registration.registration_number)
                 results.append(
