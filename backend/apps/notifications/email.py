@@ -6,7 +6,8 @@ Every send is logged to the Notification model regardless of success or
 failure, so the admin can see delivery status per registration.
 """
 
-from email.mime.image import MIMEImage
+import mimetypes
+from email.message import MIMEPart
 
 from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
@@ -26,12 +27,16 @@ def send_email(
 ):
     """
     inline_images: optional list of (content_id, file_path) pairs to embed
-    directly in the message (MIME multipart/related) rather than link to.
+    directly in the message as inline attachments, rather than link to.
     An <img src="cid:{content_id}"> in html_body then renders from the
     attachment itself — no external fetch, so it isn't affected by a mail
     client's "don't auto-load remote images" default (the usual reason a
     hosted-URL logo silently fails to show in Outlook) and isn't subject
-    to the sending domain's reputation either.
+    to the sending domain's reputation either. Built as raw MIMEPart
+    objects (Django 6's EmailMessage now runs on the modern email.message
+    API and dropped the old mixed_subtype="related" escape hatch) — mail
+    clients resolve a cid: reference against any attachment carrying a
+    matching Content-ID, not only ones nested under multipart/related.
     """
     notification = Notification.objects.create(
         registration=registration,
@@ -54,13 +59,21 @@ def send_email(
             message.attach_alternative(html_body, "text/html")
 
         if inline_images:
-            message.mixed_subtype = "related"
             for content_id, file_path in inline_images:
                 with open(file_path, "rb") as f:
-                    image = MIMEImage(f.read())
-                image.add_header("Content-ID", f"<{content_id}>")
-                image.add_header("Content-Disposition", "inline", filename=file_path.split("/")[-1])
-                message.attach(image)
+                    image_bytes = f.read()
+                mimetype = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+                maintype, _, subtype = mimetype.partition("/")
+                image_part = MIMEPart()
+                image_part.set_content(
+                    image_bytes,
+                    maintype=maintype,
+                    subtype=subtype,
+                    disposition="inline",
+                    filename=file_path.rsplit("/", 1)[-1],
+                    cid=f"<{content_id}>",
+                )
+                message.attach(image_part)
 
         message.send(fail_silently=False)
 
