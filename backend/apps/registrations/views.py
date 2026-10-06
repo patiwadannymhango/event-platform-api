@@ -172,11 +172,16 @@ class PublicRegistrationLookupView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        form_data = registration.form_data or {}
+
         return Response(
             {
                 "reference": registration.registration_number,
                 "status": registration.status,
                 "category": registration.category.name,
+                "category_code": registration.category.code,
+                "tshirt_size": form_data.get("tshirt_size", ""),
+                "attendance_type": form_data.get("attendance_type", ""),
                 "amount": str(registration.amount),
                 "currency": registration.currency,
                 "full_name": (
