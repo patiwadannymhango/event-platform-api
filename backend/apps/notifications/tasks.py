@@ -42,7 +42,7 @@ def send_race_pack_email(registration_id):
     if not email:
         return "no email on file"
 
-    subject, text_body, html_body = build_race_pack_email(
+    subject, text_body, html_body, inline_images = build_race_pack_email(
         first_name=registration.participant.first_name or "Runner",
         reference=registration.registration_number,
     )
@@ -54,5 +54,6 @@ def send_race_pack_email(registration_id):
         html_body=html_body,
         registration=registration,
         notification_type=Notification.NotificationType.RACE_PACK_COLLECTION,
+        inline_images=inline_images,
     )
     return "sent"
