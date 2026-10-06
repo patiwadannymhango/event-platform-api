@@ -21,11 +21,9 @@ _TEXT_TEMPLATE = """Dear {first_name},
 
 Please see the 10th October - Copperbelt Marathon 2026 Race Pack Collection details below:
 
-Corporate Collections: We Shall Deliver.
-
 Virtual Participants: Race Packs Will Be Sent.
 
-Individual Collections:
+Corporate and Individual Collection:
 8th October (Thursday): 09:00hrs-17:00hrs
 9th October (Friday): 09:00hrs-17:00hrs
 
