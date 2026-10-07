@@ -22,6 +22,18 @@ SUBJECT = "Copperbelt Marathon 2026 — Race Pack Collection Details"
 
 LOGO_CONTENT_ID = "race_pack_logo"
 
+# Both days, shown to everyone by default. The "purple group" (confirmed
+# since the 5 October print-dump cutoff — see PURPLE_SINCE_CUTOFF in the
+# admin's Registrations.tsx) gets a Friday-only variant instead, to spread
+# collection across the two days rather than everyone showing up at once.
+COLLECTION_DAYS_BOTH = [
+    {"label": "8th October (Thursday)", "time": "09:00 – 17:00"},
+    {"label": "9th October (Friday)", "time": "09:00 – 17:00"},
+]
+COLLECTION_DAYS_FRIDAY_ONLY = [
+    {"label": "9th October (Friday)", "time": "09:00 – 17:00"},
+]
+
 _TEXT_TEMPLATE = """Dear {first_name},
 
 Please see the 10th October - Copperbelt Marathon 2026 Race Pack Collection details below:
@@ -29,8 +41,7 @@ Please see the 10th October - Copperbelt Marathon 2026 Race Pack Collection deta
 Virtual Participants: Race Packs Will Be Sent.
 
 Corporate and Individual Collection:
-8th October (Thursday): 09:00hrs-17:00hrs
-9th October (Friday): 09:00hrs-17:00hrs
+{collection_days_text}
 
 Venue: ECL Mall, Kitwe - Marathon Registration Desk
 
@@ -42,15 +53,28 @@ Questions? {contact_email}{contact_phone_line}
 See you on race day!"""
 
 
-def build_race_pack_email(*, first_name, reference):
+def build_race_pack_email(*, first_name, reference, collection_days=None):
     """
     Returns (subject, text_body, html_body, inline_images) for one
     recipient — inline_images is ready to pass straight through to
     send_email()'s inline_images= kwarg.
+
+    collection_days: list of {"label", "time"} dicts to show, in order.
+    Defaults to both Thursday and Friday. Pass COLLECTION_DAYS_FRIDAY_ONLY
+    for the purple group.
     """
+    if collection_days is None:
+        collection_days = COLLECTION_DAYS_BOTH
+
+    collection_days_text = "\n".join(
+        f"{day['label']}: {day['time'].replace(chr(0x2013), '-')}hrs"
+        for day in collection_days
+    )
+
     text = _TEXT_TEMPLATE.format(
         first_name=first_name,
         reference=reference,
+        collection_days_text=collection_days_text,
         contact_email=settings.DEFAULT_FROM_EMAIL,
         contact_phone_line=f" / {settings.EVENT_CONTACT_PHONE}" if settings.EVENT_CONTACT_PHONE else "",
     )
@@ -61,6 +85,7 @@ def build_race_pack_email(*, first_name, reference):
             "first_name": first_name,
             "reference": reference,
             "event_name": "Copperbelt Marathon 2026",
+            "collection_days": collection_days,
             "contact_email": settings.DEFAULT_FROM_EMAIL,
             "contact_phone": settings.EVENT_CONTACT_PHONE,
         },
