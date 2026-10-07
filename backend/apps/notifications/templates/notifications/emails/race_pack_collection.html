@@ -47,16 +47,19 @@
 </td>
 </tr>
 
-<!-- Corporate and individual collection schedule -->
+<!-- Collection schedule -->
 <tr>
 <td style="padding:24px 32px 0;">
-<div style="font-size:12.5px; font-weight:bold; color:#74371B; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:10px; font-family:Helvetica, Arial, sans-serif;">Corporate and Individual Collection</div>
+<div style="font-size:12.5px; font-weight:bold; color:#74371B; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:10px; font-family:Helvetica, Arial, sans-serif;">{{ collection_heading }}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f9f6f2; border:1px solid #e1dad2; border-radius:10px;">
 {% for day in collection_days %}
 <tr>
 <td style="padding:14px 22px;{% if not forloop.last %} border-bottom:1px solid #e1dad2;{% endif %}">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-<td style="font-size:13.5px; font-weight:bold; color:#1a1108; font-family:Helvetica, Arial, sans-serif;">{{ day.label }}</td>
+<td>
+{% if day.note %}<div style="font-size:10.5px; font-weight:bold; color:#C06A38; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:2px; font-family:Helvetica, Arial, sans-serif;">{{ day.note }}</div>{% endif %}
+<span style="font-size:13.5px; font-weight:bold; color:#1a1108; font-family:Helvetica, Arial, sans-serif;">{{ day.label }}</span>
+</td>
 <td align="right" style="font-size:13.5px; font-weight:bold; color:#C06A38; font-family:Helvetica, Arial, sans-serif;">{{ day.time }}</td>
 </tr></table>
 </td>
