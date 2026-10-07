@@ -40,7 +40,7 @@ COLLECTION_DAYS_FRIDAY_ONLY = [
 # both under one generic heading.
 COLLECTION_HEADING_SPLIT = "Collection Schedule"
 COLLECTION_DAYS_SPLIT_BY_AUDIENCE = [
-    {"label": "8th October (Thursday)", "time": "09:00 – 17:00", "note": "Corporate Collection Only"},
+    {"label": "8th October (Thursday)", "time": "We will deliver", "note": "Corporate Collection"},
     {"label": "9th October (Friday)", "time": "09:00 – 17:00", "note": "Individual Collection"},
 ]
 
@@ -83,8 +83,14 @@ def build_race_pack_email(*, first_name, reference, collection_days=None, collec
     if collection_heading is None:
         collection_heading = COLLECTION_HEADING_DEFAULT
 
+    def _format_time(value):
+        # Only an actual time range (e.g. "09:00 – 17:00") gets "hrs"
+        # appended — free text like "We will deliver" is left as-is.
+        cleaned = value.replace(chr(0x2013), "-")
+        return f"{cleaned}hrs" if any(ch.isdigit() for ch in cleaned) else cleaned
+
     collection_days_text = "\n".join(
-        f"{day['note'] + ' — ' if day.get('note') else ''}{day['label']}: {day['time'].replace(chr(0x2013), '-')}hrs"
+        f"{day['note'] + ' — ' if day.get('note') else ''}{day['label']}: {_format_time(day['time'])}"
         for day in collection_days
     )
 
