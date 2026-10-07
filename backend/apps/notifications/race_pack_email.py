@@ -40,7 +40,7 @@ COLLECTION_DAYS_FRIDAY_ONLY = [
 # both under one generic heading.
 COLLECTION_HEADING_SPLIT = "Collection Schedule"
 COLLECTION_DAYS_SPLIT_BY_AUDIENCE = [
-    {"label": "8th October (Thursday)", "time": "We will deliver", "note": "Corporate Collection"},
+    {"label": "8th October (Thursday)", "time": "09:00 – 17:00", "note": "Corporate Collection Only"},
     {"label": "9th October (Friday)", "time": "09:00 – 17:00", "note": "Individual Collection"},
 ]
 
