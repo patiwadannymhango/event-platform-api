@@ -136,6 +136,12 @@ class PublicRegistrationSerializer(
                 "Registration is not currently open for this event."
             )
 
+        if event.is_registration_full():
+            raise serializers.ValidationError(
+                "Registration for this event has closed — "
+                "the confirmed participant limit has been reached."
+            )
+
         try:
             category = (
                 RegistrationCategory.objects.get(

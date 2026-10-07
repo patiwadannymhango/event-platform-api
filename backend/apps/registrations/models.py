@@ -224,7 +224,15 @@ class RegistrationCategory(UUIDModel):
         public categories list (what decides whether the option is
         shown as disabled) can never drift out of sync with what
         actually gets rejected.
+
+        Also sold out if the event's own event-wide cap has been
+        reached (see Event.is_registration_full) — that's a separate,
+        stricter gate than any single category's own capacity, and
+        every category closes at once when it trips.
         """
+        if self.event.is_registration_full():
+            return True
+
         if self.capacity is None:
             return False
 

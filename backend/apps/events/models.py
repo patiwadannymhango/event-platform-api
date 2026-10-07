@@ -62,6 +62,34 @@ class Event(UUIDModel):
         default=True,
     )
 
+    # A hard, event-wide stop on new registrations, independent of each
+    # category's own `capacity` — the two serve different purposes.
+    # Category capacity gates per-category availability (so "Full Marathon"
+    # can sell out while "10K" stays open) and counts pending/processing
+    # attempts too, so it has headroom built in for in-flight payments.
+    # This field is the actual physical/logistical ceiling (race packs,
+    # medals, etc. procured for N people) and triggers strictly on
+    # CONFIRMED count — once reached, every category closes at once,
+    # regardless of any individual category's remaining capacity.
+    # None means no event-wide cap (only per-category limits apply).
+    max_confirmed_registrations = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    def is_registration_full(self):
+        from apps.registrations.models import Registration
+
+        if self.max_confirmed_registrations is None:
+            return False
+
+        confirmed_count = Registration.objects.filter(
+            event=self,
+            status=Registration.Status.CONFIRMED,
+        ).count()
+
+        return confirmed_count >= self.max_confirmed_registrations
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
